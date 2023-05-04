@@ -1,5 +1,4 @@
-#ifndef CONFIGURATION_H
-#define CONFIGURATION_H
+#pragma once
 
 #include <QObject>
 #include <QKeySequence>
@@ -8,6 +7,7 @@
 #include <QFont>
 #include "Imports.h"
 
+// TODO: declare AppearanceDialog and SettingsDialog entries here, so that you only have to do it in once place
 #define Config() (Configuration::instance())
 #define ConfigColor(x) (Config()->getColor(x))
 #define ConfigBool(x,y) (Config()->getBool(x,y))
@@ -19,6 +19,7 @@
 
 class MenuBuilder;
 class QAction;
+class QWheelEvent;
 
 class Configuration : public QObject
 {
@@ -32,7 +33,7 @@ public:
         bool GlobalShortcut;
 
         Shortcut(QString name = QString(), QString hotkey = QString(), bool global = false)
-            : Name(name), Hotkey(hotkey), GlobalShortcut(global) { }
+            : Name(name), Hotkey(hotkey, QKeySequence::PortableText), GlobalShortcut(global) { }
 
         Shortcut(std::initializer_list<QString> names, QString hotkey = QString(), bool global = false)
             : Shortcut(QStringList(names).join(" -> "), hotkey, global) { }
@@ -67,6 +68,8 @@ public:
     void setPluginShortcut(const QString & key_id, QString description, QString defaultShortcut, bool global);
     void setupWindowPos(QWidget* window);
     void saveWindowPos(QWidget* window);
+
+    void zoomFont(const QString & fontName, QWheelEvent* event);
 
     //default setting maps
     QMap<QString, QColor> defaultColors;
@@ -107,10 +110,10 @@ public:
 signals:
     void colorsUpdated();
     void fontsUpdated();
+    void guiOptionsUpdated();
     void shortcutsUpdated();
     void tokenizerConfigUpdated();
     void disableAutoCompleteUpdated();
-    void asciiAddressDumpModeUpdated();
 
 private:
     QColor colorFromConfig(const QString & id);
@@ -126,5 +129,3 @@ private:
 
     mutable bool noMoreMsgbox;
 };
-
-#endif // CONFIGURATION_H

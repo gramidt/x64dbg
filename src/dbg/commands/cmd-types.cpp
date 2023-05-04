@@ -450,12 +450,27 @@ struct PrintVisitor : TypeManager::Visitor
 
     bool visitType(const Member & member, const Type & type) override
     {
+        if(!mParents.empty() && parent().type == Parent::Union)
+            mOffset = parent().offset;
+
         String tname;
         auto ptype = mParents.empty() ? Parent::Struct : parent().type;
         if(ptype == Parent::Array)
+        {
             tname = StringUtils::sprintf("%s[%u]", member.name.c_str(), parent().index++);
+        }
         else
+        {
             tname = StringUtils::sprintf("%s %s", type.name.c_str(), member.name.c_str());
+
+            // Prepend struct/union to pointer types
+            if(!type.pointto.empty())
+            {
+                auto ptrname = StructUnionPtrType(type.pointto);
+                if(!ptrname.empty())
+                    tname = ptrname + " " + tname;
+            }
+        }
 
         std::string path;
         for(size_t i = 0; i < mPath.size(); i++)
@@ -465,8 +480,13 @@ struct PrintVisitor : TypeManager::Visitor
             path.append(mPath[i]);
         }
         path.append(member.name);
-        if(!LabelGet(mAddr + mOffset, nullptr) && (parent().index == 1 || ptype != Parent::Array))
-            LabelSet(mAddr + mOffset, path.c_str(), false, true);
+
+        auto ptr = mAddr + mOffset;
+        if(MemIsValidReadPtr(ptr))
+        {
+            if(!LabelGet(ptr, nullptr) && (parent().index == 1 || ptype != Parent::Array))
+                LabelSet(ptr, path.c_str(), false, true);
+        }
 
         TYPEDESCRIPTOR td;
         td.expanded = false;
@@ -479,14 +499,16 @@ struct PrintVisitor : TypeManager::Visitor
         td.callback = cbPrintPrimitive;
         td.userdata = nullptr;
         mNode = GuiTypeAddNode(mParents.empty() ? nullptr : parent().node, &td);
+        mOffset += type.size;
 
-        if(ptype != Parent::Union)
-            mOffset += type.size;
         return true;
     }
 
     bool visitStructUnion(const Member & member, const StructUnion & type) override
     {
+        if(!mParents.empty() && parent().type == Parent::Type::Union)
+            mOffset = parent().offset;
+
         String tname = StringUtils::sprintf("%s %s %s", type.isunion ? "union" : "struct", type.name.c_str(), member.name.c_str());
 
         TYPEDESCRIPTOR td;
@@ -504,6 +526,8 @@ struct PrintVisitor : TypeManager::Visitor
         mPath.push_back((member.name == "visit" ? type.name : member.name) + ".");
         mParents.push_back(Parent(type.isunion ? Parent::Union : Parent::Struct));
         parent().node = node;
+        parent().size = td.size;
+        parent().offset = mOffset;
         return true;
     }
 
@@ -526,6 +550,7 @@ struct PrintVisitor : TypeManager::Visitor
         mPath.push_back(member.name + ".");
         mParents.push_back(Parent(Parent::Array));
         parent().node = node;
+        parent().size = td.size;
         return true;
     }
 
@@ -545,6 +570,7 @@ struct PrintVisitor : TypeManager::Visitor
         parent().offset = mOffset;
         parent().addr = mAddr;
         parent().node = mNode;
+        parent().size = type.size;
         mOffset = 0;
         mAddr = value;
         mPtrDepth++;
@@ -558,6 +584,10 @@ struct PrintVisitor : TypeManager::Visitor
             mOffset = parent().offset;
             mAddr = parent().addr;
             mPtrDepth--;
+        }
+        else if(parent().type == Parent::Union)
+        {
+            mOffset = parent().offset + parent().size;
         }
         mParents.pop_back();
         mPath.pop_back();
@@ -580,6 +610,7 @@ private:
         duint addr = 0;
         duint offset = 0;
         void* node = nullptr;
+        int size = 0;
 
         explicit Parent(Type type)
             : type(type) { }
@@ -627,7 +658,7 @@ bool cbInstrVisitType(int argc, char* argv[])
         dputs(QT_TRANSLATE_NOOP("DBG", "VisitType failed"));
         return false;
     }
-    GuiUpdateTypeWidget();
+    GuiUpdateAllViews();
     dputs(QT_TRANSLATE_NOOP("DBG", "Done!"));
     return true;
 }
@@ -696,6 +727,6 @@ bool cbInstrParseTypes(int argc, char* argv[])
     }
     if(!ParseTypes(data, owner))
         return false;
-    dputs("Types parsed");
+    dprintf("Parsed header: %s\n", argv[1]);
     return true;
 }

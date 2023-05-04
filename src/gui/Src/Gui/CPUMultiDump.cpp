@@ -1,5 +1,6 @@
 #include "CPUMultiDump.h"
 #include "CPUDump.h"
+#include "CPUDisassembly.h"
 #include "WatchView.h"
 #include "LocalVarsView.h"
 #include "StructWidget.h"
@@ -7,7 +8,6 @@
 #include <QInputDialog>
 #include <QMessageBox>
 #include <QTabBar>
-#include "FlickerThread.h"
 
 CPUMultiDump::CPUMultiDump(CPUDisassembly* disas, int nbCpuDumpTabs, QWidget* parent)
     : MHTabWidget(parent, true)
@@ -17,7 +17,7 @@ CPUMultiDump::CPUMultiDump(CPUDisassembly* disas, int nbCpuDumpTabs, QWidget* pa
     mInitAllDumpTabs = false;
 
     mDumpPluginMenu = new QMenu(this);
-    mDumpPluginMenu->setIcon(DIcon("plugin.png"));
+    mDumpPluginMenu->setIcon(DIcon("plugin"));
     Bridge::getBridge()->emitMenuAddToList(this, mDumpPluginMenu, GUI_DUMP_MENU);
 
     for(uint i = 0; i < mMaxCPUDumpTabs; i++)
@@ -25,8 +25,9 @@ CPUMultiDump::CPUMultiDump(CPUDisassembly* disas, int nbCpuDumpTabs, QWidget* pa
         CPUDump* cpuDump = new CPUDump(disas, this);
         //cpuDump->loadColumnFromConfig(QString("CPUDump%1").arg(i + 1)); //TODO: needs a workaround because the columns change
         connect(cpuDump, SIGNAL(displayReferencesWidget()), this, SLOT(displayReferencesWidgetSlot()));
+        connect(cpuDump, SIGNAL(showDisassemblyTab(duint, duint, duint)), this, SLOT(showDisassemblyTabSlot(duint, duint, duint)));
         auto nativeTitle = QString("Dump ") + QString::number(i + 1);
-        this->addTabEx(cpuDump, DIcon("dump.png"), tr("Dump ") + QString::number(i + 1), nativeTitle);
+        this->addTabEx(cpuDump, DIcon("dump"), tr("Dump ") + QString::number(i + 1), nativeTitle);
         cpuDump->setWindowTitle(nativeTitle);
     }
 
@@ -36,12 +37,12 @@ CPUMultiDump::CPUMultiDump(CPUDisassembly* disas, int nbCpuDumpTabs, QWidget* pa
 
     //mMaxCPUDumpTabs++;
     auto nativeTitle = QString("Watch 1");
-    this->addTabEx(mWatch, DIcon("animal-dog.png"), tr("Watch ") + QString::number(1), nativeTitle);
+    this->addTabEx(mWatch, DIcon("animal-dog"), tr("Watch ") + QString::number(1), nativeTitle);
     mWatch->setWindowTitle(nativeTitle);
     mWatch->loadColumnFromConfig("Watch1");
 
     mLocalVars = new LocalVarsView(this);
-    this->addTabEx(mLocalVars, DIcon("localvars.png"), tr("Locals"), "Locals");
+    this->addTabEx(mLocalVars, DIcon("localvars"), tr("Locals"), "Locals");
 
     mStructWidget = new StructWidget(this);
     this->addTabEx(mStructWidget, mStructWidget->windowIcon(), mStructWidget->windowTitle(), "Struct");
@@ -99,6 +100,16 @@ void CPUMultiDump::getTabNames(QList<QString> & names)
 int CPUMultiDump::getMaxCPUTabs()
 {
     return mMaxCPUDumpTabs;
+}
+
+void CPUMultiDump::saveWindowSettings()
+{
+    mStructWidget->saveWindowSettings();
+}
+
+void CPUMultiDump::loadWindowSettings()
+{
+    mStructWidget->loadWindowSettings();
 }
 
 int CPUMultiDump::GetDumpWindowIndex(int dump)
@@ -224,10 +235,29 @@ void CPUMultiDump::focusCurrentDumpSlot()
     mCurrentCPUDump->setFocus();
 }
 
+void CPUMultiDump::showDisassemblyTabSlot(duint selectionStart, duint selectionEnd, duint firstAddress)
+{
+    Q_UNUSED(firstAddress); // TODO: implement setTableOffset(firstAddress)
+    if(!mDisassembly)
+    {
+        mDisassembly = new CPUDisassembly(this, false);
+        this->addTabEx(mDisassembly, DIcon(ArchValue("processor32", "processor64")), tr("Disassembly"), "DumpDisassembly");
+    }
+    // Set CIP
+    auto clearHistory = mDisassembly->getBase() == 0;
+    mDisassembly->disassembleAtSlot(selectionStart, Bridge::getBridge()->mLastCip);
+    if(clearHistory)
+        mDisassembly->historyClear();
+    // Make the address visisble in memory
+    mDisassembly->disassembleAt(selectionStart, true, -1);
+    // Set selection to match the dump
+    mDisassembly->setSingleSelection(selectionStart - mDisassembly->getBase());
+    mDisassembly->expandSelectionUpTo(selectionEnd - mDisassembly->getBase());
+    // Show the tab
+    setCurrentWidget(mDisassembly);
+}
+
 void CPUMultiDump::getDumpAttention()
 {
-    FlickerThread* thread = new FlickerThread(mCurrentCPUDump, this);
-    thread->setProperties(3, 1);
-    connect(thread, SIGNAL(setStyleSheet(QString)), mCurrentCPUDump, SLOT(setStyleSheet(QString)));
-    thread->start();
+    mCurrentCPUDump->getAttention();
 }

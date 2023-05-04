@@ -11,8 +11,9 @@
 #include <shlwapi.h>
 #include "console.h"
 #include "debugger.h"
+#include "value.h"
 #include <memory>
-#include "symbolundecorator.h"
+#include "LLVMDemangle/LLVMDemangle.h"
 
 std::map<Range, std::unique_ptr<MODINFO>, RangeCompare> modinfo;
 std::unordered_map<duint, std::string> hashNameMap;
@@ -60,7 +61,7 @@ static NTSTATUS ImageNtHeaders(duint base, duint size, PIMAGE_NT_HEADERS* outHea
 }
 
 // Use only with SEC_COMMIT mappings, not SEC_IMAGE! (in that case, just do VA = base + rva...)
-static ULONG64 RvaToVa(ULONG64 base, PIMAGE_NT_HEADERS ntHeaders, ULONG64 rva)
+ULONG64 ModRvaToOffset(ULONG64 base, PIMAGE_NT_HEADERS ntHeaders, ULONG64 rva)
 {
     PIMAGE_SECTION_HEADER section = IMAGE_FIRST_SECTION(ntHeaders);
     for(WORD i = 0; i < ntHeaders->FileHeader.NumberOfSections; ++i)
@@ -96,7 +97,7 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
 
     auto rva2offset = [&Info](ULONG64 rva)
     {
-        return RvaToVa(0, Info.headers, rva);
+        return ModRvaToOffset(0, Info.headers, rva);
     };
 
     auto addressOfFunctionsOffset = rva2offset(exportDir->AddressOfFunctions);
@@ -138,7 +139,7 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
         auto & entry = Info.exports.back();
         entry.ordinal = i + exportDir->Base;
         entry.rva = addressOfFunctions[i];
-        const auto entryVa = RvaToVa(FileMapVA, Info.headers, entry.rva);
+        const auto entryVa = ModRvaToOffset(FileMapVA, Info.headers, entry.rva);
         entry.forwarded = entryVa >= (ULONG64)exportDir && entryVa < (ULONG64)exportDir + exportDirSize;
         if(entry.forwarded)
         {
@@ -212,7 +213,12 @@ static void ReadExportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     for(auto & x : Info.exports)
     {
         if(!x.name.empty())
-            undecorateName(x.name, x.undecoratedName);
+        {
+            auto demangled = LLVMDemangle(x.name.c_str());
+            if(demangled && x.name.compare(demangled) != 0)
+                x.undecoratedName = demangled;
+            LLVMDemangleFree(demangled);
+        }
     }
 }
 
@@ -232,7 +238,7 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     const ULONG64 ordinalFlag = IMAGE64(Info.headers) ? IMAGE_ORDINAL_FLAG64 : IMAGE_ORDINAL_FLAG32;
     auto rva2offset = [&Info](ULONG64 rva)
     {
-        return RvaToVa(0, Info.headers, rva);
+        return ModRvaToOffset(0, Info.headers, rva);
     };
 
     for(size_t moduleIndex = 0; importDescriptor->Name != 0; ++importDescriptor, ++moduleIndex)
@@ -283,7 +289,7 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
                 // Import by ordinal
                 entry.ordinal = THUNK_VAL(Info.headers, thunkData, u1.Ordinal) & 0xffff;
                 char buf[18];
-                sprintf_s(buf, "Ordinal%u", (ULONG)entry.ordinal);
+                sprintf_s(buf, "Ordinal#%u", (ULONG)entry.ordinal);
                 entry.name = String((const char*)buf);
             }
         }
@@ -300,7 +306,15 @@ static void ReadImportDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
 
     // undecorate names
     for(auto & i : Info.imports)
-        undecorateName(i.name, i.undecoratedName);
+    {
+        if(!i.name.empty())
+        {
+            auto demangled = LLVMDemangle(i.name.c_str());
+            if(demangled && i.name.compare(demangled) != 0)
+                i.undecoratedName = demangled;
+            LLVMDemangleFree(demangled);
+        }
+    }
 }
 
 static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
@@ -326,7 +340,7 @@ static void ReadTlsCallbacks(MODINFO & Info, ULONG_PTR FileMapVA)
         return;
 
     auto imageBase = HEADER_FIELD(Info.headers, ImageBase);
-    auto tlsArrayOffset = RvaToVa(0, Info.headers, tlsDir->AddressOfCallBacks - imageBase);
+    auto tlsArrayOffset = ModRvaToOffset(0, Info.headers, tlsDir->AddressOfCallBacks - imageBase);
     if(!tlsArrayOffset)
         return;
 
@@ -463,7 +477,11 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     const auto supported = [&Info](PIMAGE_DEBUG_DIRECTORY entry)
     {
         // Check for valid RVA
-        const auto offset = RvaToVa(0, Info.headers, entry->AddressOfRawData);
+        ULONG_PTR offset = 0;
+        if(entry->AddressOfRawData)
+            offset = (ULONG_PTR)ModRvaToOffset(0, Info.headers, entry->AddressOfRawData);
+        else if(entry->PointerToRawData)
+            offset = entry->PointerToRawData;
         if(!offset)
             return false;
 
@@ -556,7 +574,12 @@ static void ReadDebugDirectory(MODINFO & Info, ULONG_PTR FileMapVA)
     }
 
     // At this point we know the entry is a valid CV one
-    auto cvData = (unsigned char*)(FileMapVA + RvaToVa(0, Info.headers, entry->AddressOfRawData));
+    ULONG_PTR offset = 0;
+    if(entry->AddressOfRawData)
+        offset = (ULONG_PTR)ModRvaToOffset(0, Info.headers, entry->AddressOfRawData);
+    else if(entry->PointerToRawData)
+        offset = entry->PointerToRawData;
+    auto cvData = (unsigned char*)(FileMapVA + offset);
     auto signature = *(DWORD*)cvData;
     if(signature == '01BN')
     {
@@ -721,6 +744,8 @@ void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
 
         curSection.addr = ntSection->VirtualAddress + Info.base;
         curSection.size = ntSection->Misc.VirtualSize;
+        if(!curSection.size)
+            curSection.size = ntSection->SizeOfRawData;
 
         // Null-terminate section name
         char sectionName[IMAGE_SIZEOF_SHORT_NAME + 1];
@@ -757,7 +782,7 @@ void GetModuleInfo(MODINFO & Info, ULONG_PTR FileMapVA)
 #undef GetUnsafeModuleInfo
 }
 
-bool ModLoad(duint Base, duint Size, const char* FullPath)
+bool ModLoad(duint Base, duint Size, const char* FullPath, bool loadSymbols)
 {
     // Handle a new module being loaded
     if(!Base || !Size || !FullPath)
@@ -784,11 +809,11 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
 
         if(fileStart)
         {
-            strcpy_s(file, fileStart + 1);
+            strncpy_s(file, fileStart + 1, _TRUNCATE);
             fileStart[0] = '\0';
         }
         else
-            strcpy_s(file, FullPath);
+            strncpy_s(file, FullPath, _TRUNCATE);
     }
 
     // Calculate module hash from full file name
@@ -815,17 +840,17 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
     info.fileMapVA = 0;
 
     // Determine whether the module is located in system
-    wchar_t sysdir[MAX_PATH];
-    GetEnvironmentVariableW(L"windir", sysdir, _countof(sysdir));
-    String Utf8Sysdir = StringUtils::Utf16ToUtf8(sysdir);
+    wchar_t szWindowsDir[MAX_PATH];
+    GetWindowsDirectoryW(szWindowsDir, _countof(szWindowsDir));
+    String Utf8Sysdir = StringUtils::Utf16ToUtf8(szWindowsDir);
     Utf8Sysdir.append("\\");
     if(_memicmp(Utf8Sysdir.c_str(), FullPath, Utf8Sysdir.size()) == 0)
     {
-        info.party = 1;
+        info.party = mod_system;
     }
     else
     {
-        info.party = 0;
+        info.party = mod_user;
     }
 
     // Load module data
@@ -863,11 +888,14 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
     }
 
     info.symbols = &EmptySymbolSource; // empty symbol source per default
-    // TODO: setting to auto load symbols
-    for(const auto & pdbPath : info.pdbPaths)
+
+    if(loadSymbols)
     {
-        if(info.loadSymbols(pdbPath, bForceLoadSymbols))
-            break;
+        for(const auto & pdbPath : info.pdbPaths)
+        {
+            if(info.loadSymbols(pdbPath, bForceLoadSymbols))
+                break;
+        }
     }
 
     // Add module to list
@@ -879,11 +907,11 @@ bool ModLoad(duint Base, duint Size, const char* FullPath)
     if(virtualModule)
     {
         if(info.entry >= Base && info.entry < Base + Size)
-            LabelSet(info.entry, "EntryPoint", false);
+            LabelSet(info.entry, "EntryPoint", false, true);
 
         apienumexports(Base, [](duint base, const char* mod, const char* name, duint addr)
         {
-            LabelSet(addr, name, false);
+            LabelSet(addr, name, false, true);
         });
     }
 
@@ -910,7 +938,7 @@ bool ModUnload(duint Base)
     return true;
 }
 
-void ModClear()
+void ModClear(bool updateGui)
 {
     {
         // Clean up all the modules
@@ -925,7 +953,8 @@ void ModClear()
     }
 
     // Tell the symbol updater
-    GuiSymbolUpdateModuleList(0, nullptr);
+    if(updateGui)
+        GuiSymbolUpdateModuleList(0, nullptr);
 }
 
 MODINFO* ModInfoFromAddr(duint Address)
@@ -1129,7 +1158,7 @@ void ModEnum(const std::function<void(const MODINFO &)> & cbEnum)
         cbEnum(*mod.second);
 }
 
-int ModGetParty(duint Address)
+MODULEPARTY ModGetParty(duint Address)
 {
     SHARED_ACQUIRE(LockModules);
 
@@ -1137,12 +1166,12 @@ int ModGetParty(duint Address)
 
     // If the module is not found, it is an user module
     if(!module)
-        return 0;
+        return mod_user;
 
     return module->party;
 }
 
-void ModSetParty(duint Address, int Party)
+void ModSetParty(duint Address, MODULEPARTY Party)
 {
     EXCLUSIVE_ACQUIRE(LockModules);
 
@@ -1226,6 +1255,21 @@ bool ModRelocationsInRange(duint Address, duint Size, std::vector<MODRELOCATIONI
 
     return !Relocations.empty();
 }
+
+#if _WIN64
+const RUNTIME_FUNCTION* MODINFO::findRuntimeFunction(DWORD rva) const
+{
+    const auto found = std::lower_bound(runtimeFunctions.cbegin(), runtimeFunctions.cend(), rva, [](const RUNTIME_FUNCTION & a, const DWORD & rva)
+    {
+        return a.EndAddress <= rva;
+    });
+
+    if(found != runtimeFunctions.cend() && rva >= found->BeginAddress)
+        return &*found;
+
+    return nullptr;
+}
+#endif
 
 bool MODINFO::loadSymbols(const String & pdbPath, bool forceLoad)
 {
@@ -1311,6 +1355,97 @@ const MODEXPORT* MODINFO::findExport(duint rva) const
             return &exports[*found];
     }
     return nullptr;
+}
+
+static bool resolveApiSetForward(const String & originatingDll, String & forwardDll, String & forwardExport)
+{
+    wchar_t szApiSetDllPath[MAX_PATH] = L"";
+    if(!GetSystemDirectoryW(szApiSetDllPath, _countof(szApiSetDllPath)))
+        return {};
+    wcsncat_s(szApiSetDllPath, L"\\downlevel\\", _TRUNCATE);
+    wcsncat_s(szApiSetDllPath, StringUtils::Utf8ToUtf16(forwardDll).c_str(), _TRUNCATE);
+    wcsncat_s(szApiSetDllPath, L".dll", _TRUNCATE);
+
+    auto ticks = GetTickCount();
+    // Load the physical module from disk
+    MODINFO info = {};
+    if(!StaticFileLoadW(szApiSetDllPath, UE_ACCESS_READ, false, &info.fileHandle, &info.loadedSize, &info.fileMap, &info.fileMapVA))
+        return false;
+
+    GetModuleInfo(info, info.fileMapVA);
+
+    NameIndex found;
+    if(!NameIndex::findByName(info.exportsByName, forwardExport, found, true))
+        return false;
+
+    const auto & foundExport = info.exports[found.index];
+    if(!foundExport.forwarded)
+    {
+        dputs("assertion failure, api set not forwarded");
+        return false;
+    }
+
+    const auto & forwardName = foundExport.forwardName;
+    auto dotIdx = forwardName.find('.');
+    if(dotIdx == String::npos)
+        return false;
+
+    forwardDll = forwardName.substr(0, dotIdx);
+    forwardExport = forwardName.substr(dotIdx + 1);
+
+    // Some DLLs have extra mappings: https://www.geoffchappell.com/studies/windows/win32/apisetschema/history/sets61.htm
+    // This is a heuristic to resolve correctly without having to implement proper APISetMap support
+    if(forwardDll == originatingDll)
+    {
+        // The only supported exceptional mapping is kernel32 -> kernelbase
+        if(_stricmp(forwardDll.c_str(), "kernel32") != 0)
+            return false;
+
+        forwardDll = "kernelbase";
+    }
+
+    return !forwardExport.empty();
+}
+
+duint MODINFO::getProcAddress(const String & exportName, int maxForwardDepth) const
+{
+    NameIndex found;
+    if(!NameIndex::findByName(exportsByName, exportName, found, false))
+        return 0;
+    const auto exportInfo = &exports[found.index];
+    if(maxForwardDepth > 0 && exportInfo->forwarded)
+    {
+        const auto & forwardName = exportInfo->forwardName;
+        auto dotIdx = forwardName.find('.');
+        if(dotIdx == String::npos)
+            return 0;
+        auto forwardExport = forwardName.substr(dotIdx + 1);
+        if(forwardExport.empty())
+            return 0;
+        auto forwardDll = forwardName.substr(0, dotIdx);
+        auto forwardBase = ModBaseFromName(forwardDll.c_str());
+        if(forwardBase == 0 && _strnicmp(forwardDll.c_str(), "api-", 4) == 0 || _strnicmp(forwardDll.c_str(), "ext-", 4) == 0)
+        {
+            if(!resolveApiSetForward(name, forwardDll, forwardExport))
+                return 0;
+            forwardBase = ModBaseFromName(forwardDll.c_str());
+        }
+        auto forwardModule = ModInfoFromAddr(forwardBase);
+        if(forwardModule == nullptr)
+            return 0;
+        if(forwardExport[0] == '#')
+        {
+            duint ordinal = 0;
+            if(!convertNumber(forwardExport.c_str() + 1, ordinal, 0) || ordinal > 0xFFFF)
+                return 0;
+            auto exportIndex = ordinal - forwardModule->exportOrdinalBase;
+            if(exportIndex >= forwardModule->exports.size())
+                return 0;
+            return forwardModule->base + forwardModule->exports[exportIndex].rva;
+        }
+        return forwardModule->getProcAddress(forwardExport, maxForwardDepth - 1);
+    }
+    return base + exportInfo->rva;
 }
 
 void MODIMPORT::convertToGuiSymbol(duint base, SYMBOLINFO* info) const

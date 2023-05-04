@@ -239,9 +239,11 @@ bool BpGet(duint Address, BP_TYPE Type, const char* Name, BREAKPOINT* Bp)
     // Do a lookup by breakpoint name
     for(auto & i : breakpoints)
     {
-        // Do the names match?
+        // Breakpoint name match
         if(_stricmp(Name, i.second.name) != 0)
-            continue;
+            // Module name match in case of DLL Breakpoints
+            if(i.second.type != BPDLL || _stricmp(Name, i.second.mod) != 0)
+                continue;
 
         // Fill out the optional user buffer
         if(Bp)
@@ -299,6 +301,7 @@ bool BpUpdateDllPath(const char* module1, BREAKPOINT** newBpInfo)
                 BREAKPOINT temp;
                 temp = bpRef;
                 strcpy_s(temp.mod, module1);
+                _strlwr_s(temp.mod, strlen(temp.mod) + 1);
                 temp.addr = ModHashFromName(module1);
                 breakpoints.erase(i.first);
                 auto newItem = breakpoints.insert(std::make_pair(BreakpointKey(BPDLL, temp.addr), temp));
@@ -315,6 +318,7 @@ bool BpUpdateDllPath(const char* module1, BREAKPOINT** newBpInfo)
                 BREAKPOINT temp;
                 temp = bpRef;
                 strcpy_s(temp.mod, dashPos1 + 1);
+                _strlwr_s(temp.mod, strlen(temp.mod) + 1);
                 temp.addr = ModHashFromName(dashPos1 + 1);
                 breakpoints.erase(i.first);
                 auto newItem = breakpoints.insert(std::make_pair(BreakpointKey(BPDLL, temp.addr), temp));
@@ -503,13 +507,36 @@ bool BpSetSingleshoot(duint Address, BP_TYPE Type, bool singleshoot)
     ASSERT_DEBUGGING("Command function call");
     EXCLUSIVE_ACQUIRE(LockBreakpoints);
 
-    // Set breakpoint fast resume
+    // Set breakpoint singleshoot
     BREAKPOINT* bpInfo = BpInfoFromAddr(Type, Address);
 
     if(!bpInfo)
         return false;
 
     bpInfo->singleshoot = singleshoot;
+    // Update singleshoot information in TitanEngine
+    switch(Type)
+    {
+    case BPNORMAL:
+        bpInfo->titantype = (bpInfo->titantype & ~UE_SINGLESHOOT) | (singleshoot ? UE_SINGLESHOOT : 0);
+        if(IsBPXEnabled(Address) && bpInfo->enabled)
+        {
+            if(!DeleteBPX(Address))
+                dprintf(QT_TRANSLATE_NOOP("DBG", "Delete breakpoint failed (DeleteBPX): %p\n"), Address);
+            if(!SetBPX(Address, bpInfo->titantype, cbUserBreakpoint))
+                dprintf(QT_TRANSLATE_NOOP("DBG", "Error setting breakpoint at %p! (SetBPX)\n"), Address);
+        }
+        break;
+    case BPMEMORY:
+        if(bpInfo->enabled)
+        {
+            if(!RemoveMemoryBPX(Address, bpInfo->memsize))
+                dprintf(QT_TRANSLATE_NOOP("DBG", "Delete memory breakpoint failed (RemoveMemoryBPX): %p\n"), Address);
+            if(!SetMemoryBPXEx(Address, bpInfo->memsize, bpInfo->titantype, !singleshoot, cbMemoryBreakpoint))
+                dprintf(QT_TRANSLATE_NOOP("DBG", "Could not enable memory breakpoint %p (SetMemoryBPXEx)\n"), Address);
+        }
+        break;
+    }
     return true;
 }
 
@@ -704,6 +731,21 @@ void BpToBridge(const BREAKPOINT* Bp, BRIDGEBP* BridgeBp)
         break;
     case BPMEMORY:
         BridgeBp->type = bp_memory;
+        switch(Bp->titantype)
+        {
+        case UE_MEMORY_READ:
+            BridgeBp->typeEx = mem_read;
+            break;
+        case UE_MEMORY_WRITE:
+            BridgeBp->typeEx = mem_write;
+            break;
+        case UE_MEMORY_EXECUTE:
+            BridgeBp->typeEx = mem_execute;
+            break;
+        case UE_MEMORY:
+            BridgeBp->typeEx = mem_access;
+            break;
+        }
         break;
     case BPDLL:
         BridgeBp->type = bp_dll;

@@ -1,5 +1,4 @@
-#ifndef DISASSEMBLERGRAPHVIEW_H
-#define DISASSEMBLERGRAPHVIEW_H
+#pragma once
 
 #include <QObject>
 #include <QWidget>
@@ -23,6 +22,7 @@ class MenuBuilder;
 class CachedFontMetrics;
 class GotoDialog;
 class XrefBrowseDialog;
+class CommonActions;
 
 class DisassemblerGraphView : public QAbstractScrollArea, public ActionHelper<DisassemblerGraphView>
 {
@@ -99,7 +99,7 @@ public:
         {
             RichTextPainter::List richText;
             RichTextPainter::CustomRichText_t rt;
-            rt.highlight = false;
+            rt.underline = false;
             rt.text = text;
             rt.textColor = color;
             rt.textBackground = background;
@@ -217,8 +217,6 @@ public:
     std::tuple<duint, duint> get_selection_range();
     void set_selection_range(std::tuple<duint, duint> range);
     void copy_address();
-    //void analysis_thread_proc();
-    //void closeRequest();
     void paintNormal(QPainter & p, QRect & viewportRect, int xofs, int yofs);
     void paintOverview(QPainter & p, QRect & viewportRect, int xofs, int yofs);
     void paintEvent(QPaintEvent* event);
@@ -258,11 +256,15 @@ public:
 
     VaHistory mHistory;
 
+signals:
+    void selectionChanged(dsint parVA);
+    void displayLogWidget();
+    void detachGraph();
+
 public slots:
     void loadGraphSlot(BridgeCFGraphList* graph, duint addr);
     void graphAtSlot(duint addr);
     void updateGraphSlot();
-    void followDisassemblerSlot();
     void colorsUpdatedSlot();
     void fontsUpdatedSlot();
     void shortcutsUpdatedSlot();
@@ -278,11 +280,11 @@ public slots:
     void gotoNextSlot();
     void toggleSyncOriginSlot();
     void followActionSlot();
+    void followDisassemblySlot();
     void refreshSlot();
     void saveImageSlot();
-    void setCommentSlot();
-    void setLabelSlot();
     void xrefSlot();
+    void mnemonicHelpSlot();
     void fitToWindowSlot();
     void zoomToCursorSlot();
     void getCurrentGraphSlot(BridgeCFGraphList* graphList);
@@ -327,6 +329,7 @@ private:
     std::vector<int> row_edge_y;
     CachedFontMetrics* mFontMetrics;
     MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
     QMenu* mPluginMenu;
     bool drawOverview;
     bool onlySummary;
@@ -367,6 +370,7 @@ private:
     QColor mCipColor;
     QColor mBreakpointColor;
     QColor mDisabledBreakpointColor;
+    QColor mBookmarkBackgroundColor;
     QColor graphNodeColor;
     QColor graphNodeBackgroundColor;
     QColor graphCurrentShadowColor;
@@ -379,5 +383,3 @@ private:
 
     void addReferenceAction(QMenu* menu, duint addr, const QString & description);
 };
-
-#endif // DISASSEMBLERGRAPHVIEW_H

@@ -1,5 +1,4 @@
-#ifndef ZYDIS_WRAPPER_H
-#define ZYDIS_WRAPPER_H
+#pragma once
 
 #include "Zydis/Zydis.h"
 #include <functional>
@@ -91,6 +90,16 @@ public:
 
     bool IsBranchType(std::underlying_type_t<BranchType> bt) const;
 
+    enum VectorElementType : uint8_t
+    {
+        VETDefault,
+        VETFloat32,
+        VETFloat64,
+        VETInt32,
+        VETInt64
+    };
+    VectorElementType getVectorElementType(int opindex) const;
+
     // Shortcuts.
     bool IsRet() const { return IsBranchType(BTRet); }
     bool IsCall() const { return IsBranchType(BTCall); }
@@ -107,5 +116,3 @@ private:
     bool mSuccess;
     uint8_t mVisibleOpCount;
 };
-
-#endif //ZYDIS_WRAPPER_H

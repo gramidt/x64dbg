@@ -1,5 +1,4 @@
-#ifndef CPUARGUMENTWIDGET_H
-#define CPUARGUMENTWIDGET_H
+#pragma once
 
 #include <QWidget>
 #include <vector>
@@ -41,7 +40,7 @@ public:
     }
 
 public slots:
-    void disassembledAtSlot(dsint addr, dsint cip, bool history, dsint newTableOffset);
+    void disassembleAtSlot(dsint addr, dsint cip);
     void refreshData();
 
 private slots:
@@ -153,5 +152,3 @@ private:
 
     void updateStackOffset(bool iscall);
 };
-
-#endif // CPUARGUMENTWIDGET_H

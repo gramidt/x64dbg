@@ -12,6 +12,7 @@
 #include "value.h"
 #include "symbolinfo.h"
 #include "argument.h"
+#include "expressionparser.h"
 
 bool cbBadCmd(int argc, char* argv[])
 {
@@ -19,79 +20,91 @@ bool cbBadCmd(int argc, char* argv[])
     int valsize = 0;
     bool isvar = false;
     bool hexonly = false;
-    if(valfromstring(*argv, &value, false, false, &valsize, &isvar, &hexonly, true)) //dump variable/value/register/etc
+    bool silent = false;
+    bool baseonly = false;
+    bool allowassign = true;
+    ExpressionParser parser(argv[0]);
+    ExpressionParser::EvalValue evalue(0);
+    if(parser.Calculate(evalue, valuesignedcalc(), allowassign, silent, baseonly, &valsize, &isvar, &hexonly))
     {
-        varset("$ans", value, true);
-        if(valsize)
-            valsize *= 2;
-        else
-            valsize = 1;
-        char format_str[deflen] = "";
-        auto symbolic = SymGetSymbolicName(value);
-        if(symbolic.length())
-            symbolic = " " + symbolic;
-        if(isvar) // and *cmd!='.' and *cmd!='x') //prevent stupid 0=0 stuff
+        if(evalue.isString)
         {
-            if(value > 9 && !hexonly)
+            dputs_untranslated(StringUtils::Escape(evalue.data).c_str());
+        }
+        else if(evalue.DoEvaluate(value, silent, baseonly, &valsize, &isvar, &hexonly))
+        {
+            varset("$ans", value, true);
+            if(valsize)
+                valsize *= 2;
+            else
+                valsize = 1;
+            char format_str[deflen] = "";
+            auto symbolic = SymGetSymbolicName(value, false);
+            if(symbolic.length())
+                symbolic = " " + symbolic;
+            if(isvar)  // and *cmd!='.' and *cmd!='x') //prevent stupid 0=0 stuff
             {
-                if(!valuesignedcalc()) //signed numbers
+                if(value > 9 && !hexonly)
+                {
+                    if(!valuesignedcalc())  //signed numbers
 #ifdef _WIN64
-                    sprintf_s(format_str, "%%s=%%.%dllX (%%llud)%%s\n", valsize); // TODO: This and the following statements use "%llX" for a "int"-typed variable. Maybe we can use "%X" everywhere?
+                        sprintf_s(format_str, "%%s=%%.%dllX (%%llud)%%s\n", valsize); // TODO: This and the following statements use "%llX" for a "int"-typed variable. Maybe we can use "%X" everywhere?
 #else //x86
-                    sprintf_s(format_str, "%%s=%%.%dX (%%ud)%%s\n", valsize);
+                        sprintf_s(format_str, "%%s=%%.%dX (%%ud)%%s\n", valsize);
 #endif //_WIN64
+                    else
+#ifdef _WIN64
+                        sprintf_s(format_str, "%%s=%%.%dllX (%%lld)%%s\n", valsize);
+#else //x86
+                        sprintf_s(format_str, "%%s=%%.%dX (%%d)%%s\n", valsize);
+#endif //_WIN64
+                    dprintf_untranslated(format_str, *argv, value, value, symbolic.c_str());
+                }
                 else
-#ifdef _WIN64
-                    sprintf_s(format_str, "%%s=%%.%dllX (%%lld)%%s\n", valsize);
-#else //x86
-                    sprintf_s(format_str, "%%s=%%.%dX (%%d)%%s\n", valsize);
-#endif //_WIN64
-                dprintf_untranslated(format_str, *argv, value, value, symbolic.c_str());
+                {
+                    sprintf_s(format_str, "%%s=%%.%dX%%s\n", valsize);
+                    dprintf_untranslated(format_str, *argv, value, symbolic.c_str());
+                }
             }
             else
             {
-                sprintf_s(format_str, "%%s=%%.%dX%%s\n", valsize);
-                dprintf_untranslated(format_str, *argv, value, symbolic.c_str());
-            }
-        }
-        else
-        {
-            if(value > 9 && !hexonly)
-            {
-                if(!valuesignedcalc()) //signed numbers
+                if(value > 9 && !hexonly)
+                {
+                    if(!valuesignedcalc())  //signed numbers
 #ifdef _WIN64
-                    sprintf_s(format_str, "%%s=%%.%dllX (%%llud)%%s\n", valsize);
+                        sprintf_s(format_str, "%%s=%%.%dllX (%%llud)%%s\n", valsize);
 #else //x86
-                    sprintf_s(format_str, "%%s=%%.%dX (%%ud)%%s\n", valsize);
+                        sprintf_s(format_str, "%%s=%%.%dX (%%ud)%%s\n", valsize);
 #endif //_WIN64
+                    else
+#ifdef _WIN64
+                        sprintf_s(format_str, "%%s=%%.%dllX (%%lld)%%s\n", valsize);
+#else //x86
+                        sprintf_s(format_str, "%%s=%%.%dX (%%d)%%s\n", valsize);
+#endif //_WIN64
+#ifdef _WIN64
+                    sprintf_s(format_str, "%%.%dllX (%%llud)%%s\n", valsize);
+#else //x86
+                    sprintf_s(format_str, "%%.%dX (%%ud)%%s\n", valsize);
+#endif //_WIN64
+                    dprintf_untranslated(format_str, value, value, symbolic.c_str());
+                }
                 else
+                {
 #ifdef _WIN64
-                    sprintf_s(format_str, "%%s=%%.%dllX (%%lld)%%s\n", valsize);
+                    sprintf_s(format_str, "%%.%dllX%%s\n", valsize);
 #else //x86
-                    sprintf_s(format_str, "%%s=%%.%dX (%%d)%%s\n", valsize);
+                    sprintf_s(format_str, "%%.%dX%%s\n", valsize);
 #endif //_WIN64
-#ifdef _WIN64
-                sprintf_s(format_str, "%%.%dllX (%%llud)%%s\n", valsize);
-#else //x86
-                sprintf_s(format_str, "%%.%dX (%%ud)%%s\n", valsize);
-#endif //_WIN64
-                dprintf_untranslated(format_str, value, value, symbolic.c_str());
-            }
-            else
-            {
-#ifdef _WIN64
-                sprintf_s(format_str, "%%.%dllX%%s\n", valsize);
-#else //x86
-                sprintf_s(format_str, "%%.%dX%%s\n", valsize);
-#endif //_WIN64
-                dprintf_untranslated(format_str, value, symbolic.c_str());
+                    dprintf_untranslated(format_str, value, symbolic.c_str());
+                }
             }
         }
-    }
-    else //unknown command
-    {
-        dprintf_untranslated("Unknown command/expression: \"%s\"\n", *argv);
-        return false;
+        else //unknown command
+        {
+            dprintf_untranslated("Unknown command/expression: \"%s\"\n", *argv);
+            return false;
+        }
     }
     return true;
 }
@@ -241,7 +254,7 @@ bool cbInstrZydis(int argc, char* argv[])
     int argcount = instr->operandCount;
     dputs_untranslated(cp.InstructionText(true).c_str());
     dprintf_untranslated("prefix size: %d\n", instr->raw.prefixes.count);
-    if(instr->raw.rex.isDecoded)
+    if(instr->attributes & ZYDIS_ATTRIB_HAS_REX)
         dprintf_untranslated("rex.W: %d, rex.R: %d, rex.X: %d, rex.B: %d, rex.data: %02x\n", instr->raw.rex.W, instr->raw.rex.R, instr->raw.rex.X, instr->raw.rex.B, instr->raw.rex.data[0]);
     dprintf_untranslated("disp.offset: %d, disp.size: %d\n", instr->raw.disp.offset, instr->raw.disp.size);
     dprintf_untranslated("imm[0].offset: %d, imm[0].size: %d\n", instr->raw.imm[0].offset, instr->raw.imm[0].size);
@@ -351,7 +364,7 @@ bool cbInstrVisualize(int argc, char* argv[])
             BpClear();
             BookmarkClear();
             LabelClear();
-            SetContextDataEx(fdProcessInfo->hThread, UE_CIP, addr);
+            SetContextDataEx(hActiveThread, UE_CIP, addr);
             if(end)
                 BpNew(end, true, false, 0, BPNORMAL, 0, nullptr);
             if(jumpback)
@@ -403,7 +416,7 @@ bool cbInstrVisualize(int argc, char* argv[])
         FunctionAdd(start, end, false);
         BpClear();
         BookmarkClear();
-        SetContextDataEx(fdProcessInfo->hThread, UE_CIP, start);
+        SetContextDataEx(hActiveThread, UE_CIP, start);
         DebugUpdateGuiAsync(start, false);
     }
     return true;
@@ -500,5 +513,95 @@ bool cbInstrAnimateWait(int argc, char* argv[])
     {
         Sleep(1);
     }
+    return true;
+}
+
+#include <lz4/lz4file.h>
+
+bool cbInstrDbdecompress(int argc, char* argv[])
+{
+    if(argc < 2)
+    {
+        dprintf_untranslated("Usage: dbdecompress \"c:\\path\\to\\db\"\n");
+        return false;
+    }
+    auto dbFile = StringUtils::Utf8ToUtf16(argv[1]);
+    if(LZ4_decompress_fileW(dbFile.c_str(), dbFile.c_str()) != LZ4_SUCCESS)
+    {
+        dprintf_untranslated("Failed to decompress '%s'\n", argv[1]);
+        return false;
+    }
+    dprintf_untranslated("Decompressed '%s'\n", argv[1]);
+    return true;
+}
+
+bool cbInstrDebugFlags(int argc, char* argv[])
+{
+    if(argc < 2)
+    {
+        dprintf_untranslated("Usage: DebugFlags 0xFFFFFFFF\n");
+        return false;
+    }
+    auto debugFlags = (DWORD)DbgValFromString(argv[1]);
+    dbgsetdebugflags(debugFlags);
+    dprintf_untranslated("DebugFlags = 0x%08X\n", debugFlags);
+    return true;
+}
+
+bool cbInstrLabelRuntimeFunctions(int argc, char* argv[])
+{
+#ifdef _WIN64
+    if(argc < 2)
+    {
+        dputs_untranslated("Usage: LabelRuntimeFunctions modaddr");
+        return false;
+    }
+    auto modaddr = DbgValFromString(argv[1]);
+    SHARED_ACQUIRE(LockModules);
+    auto info = ModInfoFromAddr(modaddr);
+    if(info)
+    {
+        std::vector<COMMENTSINFO> comments;
+        CommentGetList(comments);
+        for(const auto & comment : comments)
+        {
+            if(comment.modhash == info->hash)
+            {
+                if(!comment.manual && comment.text.find("RUNTIME_FUNCTION") == 0)
+                {
+                    CommentDelete(comment.addr + info->base);
+                }
+            }
+        }
+        for(const auto & runtimeFunction : info->runtimeFunctions)
+        {
+            auto setComment = [info](duint addr, const char* prefix)
+            {
+                char comment[MAX_COMMENT_SIZE] = "";
+                if(!CommentGet(addr, comment))
+                    strncpy_s(comment, "RUNTIME_FUNCTION", _TRUNCATE);
+                strncat_s(comment, " ", _TRUNCATE);
+                strncat_s(comment, prefix, _TRUNCATE);
+                CommentSet(addr, comment, false);
+            };
+            setComment(info->base + runtimeFunction.BeginAddress, "BeginAddress");
+            setComment(info->base + runtimeFunction.EndAddress, "EndAddress");
+        }
+        GuiUpdateAllViews();
+    }
+    else
+    {
+        dprintf_untranslated("No module found at %p\n", modaddr);
+    }
+    return true;
+#else
+    return false;
+#endif // _WIN64
+}
+
+bool cbInstrCmdTest(int argc, char* argv[])
+{
+    for(int i = 0; i < argc; i++)
+        dprintf_untranslated("argv[%d]:%s\n", i, argv[i]);
     return true;
 }

@@ -15,6 +15,7 @@ COV/
 minidump/
 CppDependOut/
 .vs/
+.vscode/
 
 # Global filetypes to ignore
 *.depend
@@ -24,7 +25,6 @@ CppDependOut/
 *.bmarks
 *.chw
 *.cbTemp
-*.ini
 *.opensdf
 *.sdf
 *.suo
@@ -73,9 +73,12 @@ src/build-*/
 !/hooks/AStyleHelper.exe
 !/hooks/AStyle.dll
 !/bin/x64dbg_shell_remove.reg
+!/bin/themes/
 !*.lib
 .scannerwork/
 bw-output/
 build-wrapper*
 My Amplifier Results - */
 My Inspector Results - */
+/bin/x96dbg.ini
+/src/gui/msvc_make.bat

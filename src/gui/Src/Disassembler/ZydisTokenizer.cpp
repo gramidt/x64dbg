@@ -12,7 +12,7 @@ ZydisTokenizer::ZydisTokenizer(int maxModuleLength)
     SetConfig(false, false, false, false, false, false, false, false, false);
 }
 
-static ZydisTokenizer::TokenColor colorNamesMap[ZydisTokenizer::TokenType::Last];
+static ZydisTokenizer::TokenColor colorNamesMap[size_t(ZydisTokenizer::TokenType::Last)];
 QHash<QString, int> ZydisTokenizer::stringPoolMap;
 int ZydisTokenizer::poolId = 0;
 
@@ -91,22 +91,22 @@ void ZydisTokenizer::UpdateStringPool()
     addStringsToPool("r13 r13d r13w r13b");
     addStringsToPool("r14 r14d r14w r14b");
     addStringsToPool("r15 r15d r15w r15b");
-    addStringsToPool("xmm0 ymm0");
-    addStringsToPool("xmm1 ymm1");
-    addStringsToPool("xmm2 ymm2");
-    addStringsToPool("xmm3 ymm3");
-    addStringsToPool("xmm4 ymm4");
-    addStringsToPool("xmm5 ymm5");
-    addStringsToPool("xmm6 ymm6");
-    addStringsToPool("xmm7 ymm7");
-    addStringsToPool("xmm8 ymm8");
-    addStringsToPool("xmm9 ymm9");
-    addStringsToPool("xmm10 ymm10");
-    addStringsToPool("xmm11 ymm11");
-    addStringsToPool("xmm12 ymm12");
-    addStringsToPool("xmm13 ymm13");
-    addStringsToPool("xmm14 ymm14");
-    addStringsToPool("xmm15 ymm15");
+    addStringsToPool("xmm0 ymm0 zmm0");
+    addStringsToPool("xmm1 ymm1 zmm1");
+    addStringsToPool("xmm2 ymm2 zmm2");
+    addStringsToPool("xmm3 ymm3 zmm3");
+    addStringsToPool("xmm4 ymm4 zmm4");
+    addStringsToPool("xmm5 ymm5 zmm5");
+    addStringsToPool("xmm6 ymm6 zmm6");
+    addStringsToPool("xmm7 ymm7 zmm7");
+    addStringsToPool("xmm8 ymm8 zmm8");
+    addStringsToPool("xmm9 ymm9 zmm9");
+    addStringsToPool("xmm10 ymm10 zmm10");
+    addStringsToPool("xmm11 ymm11 zmm11");
+    addStringsToPool("xmm12 ymm12 zmm12");
+    addStringsToPool("xmm13 ymm13 zmm13");
+    addStringsToPool("xmm14 ymm14 zmm14");
+    addStringsToPool("xmm15 ymm15 zmm15");
 }
 
 bool ZydisTokenizer::Tokenize(duint addr, const unsigned char* data, int datasize, InstructionToken & instruction)
@@ -125,14 +125,29 @@ bool ZydisTokenizer::Tokenize(duint addr, const unsigned char* data, int datasiz
 
         for(int i = 0; i < _cp.OpCount(); i++)
         {
-            if(i)
+            if(i == 1 && _cp[0].size >= 128 && _cp[1].type == ZYDIS_OPERAND_TYPE_REGISTER
+                    && ZydisRegisterGetClass(_cp[1].reg.value) == ZYDIS_REGCLASS_MASK)
+            {
+                if(_bArgumentSpaces)
+                    addToken(TokenType::ArgumentSpace, " ");
+                addToken(TokenType::Comma, "{");
+                if(!tokenizeOperand(_cp[i]))
+                    return false;
+                addToken(TokenType::Comma, "}");
+            }
+            else if(i)
             {
                 addToken(TokenType::Comma, ",");
                 if(_bArgumentSpaces)
                     addToken(TokenType::ArgumentSpace, " ");
+                if(!tokenizeOperand(_cp[i]))
+                    return false;
             }
-            if(!tokenizeOperand(_cp[i]))
-                return false;
+            else
+            {
+                if(!tokenizeOperand(_cp[i]))
+                    return false;
+            }
         }
     }
     else
@@ -167,6 +182,33 @@ bool ZydisTokenizer::TokenizeData(const QString & datatype, const QString & data
     instruction = _inst;
 
     return true;
+}
+
+void ZydisTokenizer::TokenizeTraceRegister(const char* reg, duint oldValue, duint newValue, std::vector<SingleToken> & tokens)
+{
+    if(tokens.size() > 0)
+    {
+        tokens.push_back(SingleToken(TokenType::ArgumentSpace, " ", TokenValue()));
+    }
+    QString regName(reg);
+    tokens.push_back(SingleToken(TokenType::GeneralRegister, ConfigBool("Disassembler", "Uppercase") ? regName.toUpper() : regName, TokenValue()));
+    tokens.push_back(SingleToken(TokenType::ArgumentSpace, ": ", TokenValue()));
+    tokens.push_back(SingleToken(TokenType::Value, ToHexString(oldValue), TokenValue(8, oldValue)));
+    tokens.push_back(SingleToken(TokenType::ArgumentSpace, "-> ", TokenValue()));
+    tokens.push_back(SingleToken(TokenType::Value, ToHexString(newValue), TokenValue(8, newValue)));
+}
+
+void ZydisTokenizer::TokenizeTraceMemory(duint address, duint oldValue, duint newValue, std::vector<SingleToken> & tokens)
+{
+    if(tokens.size() > 0)
+    {
+        tokens.push_back(SingleToken(TokenType::ArgumentSpace, " ", TokenValue()));
+    }
+    tokens.push_back(SingleToken(TokenType::Address, ToPtrString(address), TokenValue(8, address)));
+    tokens.push_back(SingleToken(TokenType::ArgumentSpace, ": ", TokenValue()));
+    tokens.push_back(SingleToken(TokenType::Value, ToHexString(oldValue), TokenValue(8, oldValue)));
+    tokens.push_back(SingleToken(TokenType::ArgumentSpace, "-> ", TokenValue()));
+    tokens.push_back(SingleToken(TokenType::Value, ToHexString(newValue), TokenValue(8, newValue)));
 }
 
 void ZydisTokenizer::UpdateConfig()
@@ -210,19 +252,27 @@ const Zydis & ZydisTokenizer::GetZydis() const
 void ZydisTokenizer::TokenToRichText(const InstructionToken & instr, RichTextPainter::List & richTextList, const SingleToken* highlightToken)
 {
     QColor highlightColor = ConfigColor("InstructionHighlightColor");
+    QColor highlightBackgroundColor = ConfigColor("InstructionHighlightBackgroundColor");
     for(const auto & token : instr.tokens)
     {
         RichTextPainter::CustomRichText_t richText;
-        richText.highlight = TokenEquals(&token, highlightToken);
-        richText.highlightColor = highlightColor;
         richText.flags = RichTextPainter::FlagNone;
         richText.text = token.text;
+        richText.underline = false;
         if(token.type < TokenType::Last)
         {
             const auto & tokenColor = colorNamesMap[int(token.type)];
             richText.flags = tokenColor.flags;
-            richText.textColor = tokenColor.color;
-            richText.textBackground = tokenColor.backgroundColor;
+            if(TokenEquals(&token, highlightToken))
+            {
+                richText.textColor = highlightColor;
+                richText.textBackground = highlightBackgroundColor;
+            }
+            else
+            {
+                richText.textColor = tokenColor.color;
+                richText.textBackground = tokenColor.backgroundColor;
+            }
         }
         richTextList.push_back(richText);
     }
@@ -411,6 +461,8 @@ bool ZydisTokenizer::tokenizeMnemonic()
         _mnemonicType = TokenType::MnemonicNop;
     else if(_cp.IsInt3())
         _mnemonicType = TokenType::MnemonicInt3;
+    else if(_cp.IsUnusual())
+        _mnemonicType = TokenType::MnemonicUnusual;
     else if(_cp.IsBranchType(Zydis::BTCallSem))
         _mnemonicType = TokenType::MnemonicCall;
     else if(_cp.IsBranchType(Zydis::BTCondJmpSem))
@@ -421,8 +473,6 @@ bool ZydisTokenizer::tokenizeMnemonic()
         _mnemonicType = TokenType::MnemonicRet;
     else if(_cp.IsPushPop())
         _mnemonicType = TokenType::MnemonicPushPop;
-    else if(_cp.IsUnusual())
-        _mnemonicType = TokenType::MnemonicUnusual;
 
     return tokenizeMnemonic(_mnemonicType, mnemonic);
 }
@@ -481,6 +531,7 @@ bool ZydisTokenizer::tokenizeRegOperand(const ZydisDecodedOperand & op)
         registerType = TokenType::YmmRegister;
         break;
     case ZYDIS_REGCLASS_ZMM:
+    case ZYDIS_REGCLASS_MASK:
         registerType = TokenType::ZmmRegister;
         break;
     }
@@ -623,6 +674,7 @@ bool ZydisTokenizer::tokenizePtrOperand(const ZydisDecodedOperand & op)
 
 bool ZydisTokenizer::tokenizeInvalidOperand(const ZydisDecodedOperand & op)
 {
+    Q_UNUSED(op);
     addToken(TokenType::MnemonicUnusual, "???");
     return true;
 }

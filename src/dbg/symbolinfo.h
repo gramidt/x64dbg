@@ -12,7 +12,7 @@ void SymUpdateModuleList();
 bool SymDownloadSymbol(duint Base, const char* SymbolStore);
 void SymDownloadAllSymbols(const char* SymbolStore);
 bool SymAddrFromName(const char* Name, duint* Address);
-String SymGetSymbolicName(duint Address);
+String SymGetSymbolicName(duint Address, bool IncludeAddress = true);
 
 /**
 \brief Gets the source code file name and line from an address.
@@ -21,7 +21,7 @@ String SymGetSymbolicName(duint Address);
 \param [out] nLine Line number. Can be null.
 \return true if it succeeds, false if it fails.
 */
-bool SymGetSourceLine(duint Cip, char* FileName, int* Line, DWORD* displacement = nullptr);
+bool SymGetSourceLine(duint Cip, char* FileName, int* Line, duint* displacement = nullptr);
 
 bool SymGetSourceAddr(duint Module, const char* FileName, int Line, duint* Address);
 

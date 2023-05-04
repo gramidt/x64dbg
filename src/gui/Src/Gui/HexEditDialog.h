@@ -1,5 +1,4 @@
-#ifndef HEXEDITDIALOG_H
-#define HEXEDITDIALOG_H
+#pragma once
 
 #include <QDialog>
 #include "QHexEdit/QHexEdit.h"
@@ -17,7 +16,7 @@ public:
     explicit HexEditDialog(QWidget* parent = 0);
     ~HexEditDialog();
 
-    void showEntireBlock(bool show);
+    void showEntireBlock(bool show, bool checked = false);
     void showKeepSize(bool show);
     void isDataCopiable(bool copyDataEnabled);
     void updateCodepage();
@@ -25,6 +24,13 @@ public:
     bool entireBlock();
 
     QHexEdit* mHexEdit;
+
+    struct FormatType
+    {
+        QString name;
+        int itemsPerLine;
+        QString linePrefix;
+    };
 
 private slots:
     void updateStyle();
@@ -76,6 +82,7 @@ private:
         DataPascalWord,
         DataPascalDword,
         DataPascalQword,
+        DataPython3Byte,
         DataString,
         DataUnicodeString,
         DataUTF8String,
@@ -94,15 +101,7 @@ private:
         DataLast
     };
 
-    struct FormatType
-    {
-        QString name;
-        int itemsPerLine;
-    };
-
     FormatType mTypes[DataLast];
 
     void printData(DataType type);
 };
-
-#endif // HEXEDITDIALOG_H

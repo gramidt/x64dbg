@@ -180,6 +180,7 @@ bool pluginload(const char* pluginName, bool loadall)
     };
     regExport("CBINITDEBUG", CB_INITDEBUG);
     regExport("CBSTOPDEBUG", CB_STOPDEBUG);
+    regExport("CB_STOPPINGDEBUG", CB_STOPPINGDEBUG);
     regExport("CBCREATEPROCESS", CB_CREATEPROCESS);
     regExport("CBEXITPROCESS", CB_EXITPROCESS);
     regExport("CBCREATETHREAD", CB_CREATETHREAD);
@@ -212,7 +213,7 @@ bool pluginload(const char* pluginName, bool loadall)
 
     //add plugin menus
     {
-        SectionLocker<LockPluginMenuList, false> menuLock; //exclusive lock
+        SectionLocker<LockPluginMenuList, false, false> menuLock; //exclusive lock
 
         auto addPluginMenu = [](GUIMENUTYPE type)
         {
@@ -348,6 +349,8 @@ bool pluginunload(const char* pluginName, bool unloadall)
     return false;
 }
 
+typedef BOOL(WINAPI* pfnAddDllDirectory)(LPCWSTR lpPathName);
+
 /**
 \brief Loads plugins from a specified directory.
 \param pluginDir The directory to load plugins from.
@@ -357,11 +360,19 @@ void pluginloadall(const char* pluginDir)
     //reserve menu space
     pluginMenuList.reserve(1024);
     pluginMenuEntryList.reserve(1024);
+
     //load new plugins
     wchar_t currentDir[deflen] = L"";
     pluginDirectory = StringUtils::Utf8ToUtf16(pluginDir);
+
+    //add the plugins directory as valid dependency directory
+    static auto pAddDllDirectory = (pfnAddDllDirectory)GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "AddDllDirectory");
+    if(pAddDllDirectory)
+        pAddDllDirectory(pluginDirectory.c_str());
+
     GetCurrentDirectoryW(deflen, currentDir);
     SetCurrentDirectoryW(pluginDirectory.c_str());
+
     char searchName[deflen] = "";
 #ifdef _WIN64
     sprintf_s(searchName, "%s\\*.dp64", pluginDir);
@@ -380,6 +391,7 @@ void pluginloadall(const char* pluginDir)
         pluginload(StringUtils::Utf16ToUtf8(foundData.cFileName).c_str(), true);
     }
     while(FindNextFileW(hSearch, &foundData));
+
     FindClose(hSearch);
     SetCurrentDirectoryW(currentDir);
 }
@@ -389,10 +401,11 @@ void pluginloadall(const char* pluginDir)
 */
 void pluginunloadall()
 {
-    EXCLUSIVE_ACQUIRE(LockPluginList);
-    for(const auto & plugin : pluginList)
+    SHARED_ACQUIRE(LockPluginList);
+    auto pluginListCopy = pluginList;
+    SHARED_RELEASE();
+    for(const auto & plugin : pluginListCopy)
         pluginunload(plugin.plugname, true);
-    pluginList.clear();
 }
 
 /**
@@ -404,17 +417,18 @@ void plugincmdunregisterall(int pluginHandle)
     SHARED_ACQUIRE(LockPluginCommandList);
     auto commandList = pluginCommandList; //copy for thread-safety reasons
     SHARED_RELEASE();
-    auto i = commandList.begin();
-    while(i != commandList.end())
+    for(auto itr = commandList.begin(); itr != commandList.end();)
     {
-        auto currentCommand = *i;
+        auto currentCommand = *itr;
         if(currentCommand.pluginHandle == pluginHandle)
         {
-            i = commandList.erase(i);
+            itr = commandList.erase(itr);
             dbgcmddel(currentCommand.command);
         }
         else
-            ++i;
+        {
+            ++itr;
+        }
     }
 }
 
@@ -448,7 +462,7 @@ void pluginexprfuncunregisterall(int pluginHandle)
 void pluginformatfuncunregisterall(int pluginHandle)
 {
     SHARED_ACQUIRE(LockPluginFormatfunctionList);
-    auto formatFuncList = pluginExprfunctionList; //copy for thread-safety reasons
+    auto formatFuncList = pluginFormatfunctionList; //copy for thread-safety reasons
     SHARED_RELEASE();
     auto i = formatFuncList.begin();
     while(i != formatFuncList.end())
@@ -762,7 +776,7 @@ void pluginmenucall(int hEntry)
     if(hEntry == -1)
         return;
 
-    SectionLocker<LockPluginMenuList, true> menuLock; //shared lock
+    SectionLocker<LockPluginMenuList, true, false> menuLock; //shared lock
     auto i = pluginMenuEntryList.begin();
     while(i != pluginMenuEntryList.end())
     {
@@ -946,7 +960,9 @@ void pluginmenuentrysethotkey(int pluginHandle, int hEntry, const char* hotkey)
                 {
                     char name[MAX_PATH] = "";
                     strcpy_s(name, plugin.plugname);
-                    *strrchr(name, '.') = '\0';
+                    auto dot = strrchr(name, '.');
+                    if(dot != nullptr)
+                        *dot = '\0';
                     auto hack = StringUtils::sprintf("%s\1%s_%d", hotkey, name, hEntry);
                     GuiMenuSetEntryHotkey(currentMenu.hEntryMenu, hack.c_str());
                     break;
@@ -982,6 +998,28 @@ bool pluginmenuentryremove(int pluginHandle, int hEntry)
     return false;
 }
 
+struct ExprFuncWrapper
+{
+    void* user;
+    int argc;
+    CBPLUGINEXPRFUNCTION cbFunc;
+    std::vector<duint> cbArgv;
+
+    static bool callback(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        auto cbUser = reinterpret_cast<ExprFuncWrapper*>(userdata);
+
+        cbUser->cbArgv.clear();
+        for(auto i = 0; i < argc; i++)
+            cbUser->cbArgv.push_back(argv[i].number);
+
+        result->type = ValueTypeNumber;
+        result->number = cbUser->cbFunc(argc, cbUser->cbArgv.data(), cbUser->user);
+
+        return true;
+    }
+};
+
 bool pluginexprfuncregister(int pluginHandle, const char* name, int argc, CBPLUGINEXPRFUNCTION cbFunction, void* userdata)
 {
     String plugName;
@@ -990,7 +1028,18 @@ bool pluginexprfuncregister(int pluginHandle, const char* name, int argc, CBPLUG
     PLUG_EXPRFUNCTION plugExprfunction;
     plugExprfunction.pluginHandle = pluginHandle;
     strcpy_s(plugExprfunction.name, name);
-    if(!ExpressionFunctions::Register(name, argc, cbFunction, userdata))
+
+    ExprFuncWrapper* wrapper = new ExprFuncWrapper;
+    wrapper->argc = argc;
+    wrapper->cbFunc = cbFunction;
+    wrapper->user = userdata;
+
+    std::vector<ValueType> args(argc);
+
+    for(auto & arg : args)
+        arg = ValueTypeNumber;
+
+    if(!ExpressionFunctions::Register(name, ValueTypeNumber, args, wrapper->callback, wrapper))
     {
         dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN, %s] Expression function \"%s\" failed to register...\n"), plugName.c_str(), name);
         return false;
@@ -1001,6 +1050,33 @@ bool pluginexprfuncregister(int pluginHandle, const char* name, int argc, CBPLUG
     dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN, %s] Expression function \"%s\" registered!\n"), plugName.c_str(), name);
     return true;
 }
+
+bool pluginexprfuncregisterex(int pluginHandle, const char* name, const ValueType & returnType, const ValueType* argTypes, size_t argCount, CBPLUGINEXPRFUNCTIONEX cbFunction, void* userdata)
+{
+    String plugName;
+    if(!findPluginName(pluginHandle, plugName))
+        return false;
+    PLUG_EXPRFUNCTION plugExprfunction;
+    plugExprfunction.pluginHandle = pluginHandle;
+    strcpy_s(plugExprfunction.name, name);
+
+    std::vector<ValueType> argTypesVec(argCount);
+
+    for(size_t i = 0; i < argCount; i++)
+        argTypesVec[i] = argTypes[i];
+
+    if(!ExpressionFunctions::Register(name, returnType, argTypesVec, cbFunction, userdata))
+    {
+        dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN, %s] Expression function \"%s\" failed to register...\n"), plugName.c_str(), name);
+        return false;
+    }
+    EXCLUSIVE_ACQUIRE(LockPluginExprfunctionList);
+    pluginExprfunctionList.push_back(plugExprfunction);
+    EXCLUSIVE_RELEASE();
+    dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN, %s] Expression function \"%s\" registered!\n"), plugName.c_str(), name);
+    return true;
+}
+
 
 bool pluginexprfuncunregister(int pluginHandle, const char* name)
 {

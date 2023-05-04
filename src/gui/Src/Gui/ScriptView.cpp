@@ -54,7 +54,7 @@ ScriptView::ScriptView(StdTable* parent) : StdTable(parent)
     connect(Bridge::getBridge(), SIGNAL(scriptMessage(QString)), this, SLOT(message(QString)));
     connect(Bridge::getBridge(), SIGNAL(scriptQuestion(QString)), this, SLOT(question(QString)));
     connect(Bridge::getBridge(), SIGNAL(scriptEnableHighlighting(bool)), this, SLOT(enableHighlighting(bool)));
-    connect(Bridge::getBridge(), SIGNAL(close()), this, SLOT(closeSlot()));
+    connect(Bridge::getBridge(), SIGNAL(shutdown()), this, SLOT(shutdownSlot()));
     connect(this, SIGNAL(contextMenuSignal(QPoint)), this, SLOT(contextMenuSlot(QPoint)));
 
     Initialize();
@@ -130,7 +130,7 @@ QString ScriptView::paintContent(QPainter* painter, dsint rowBase, int rowOffset
             int xadd = charwidth; //for testing
             RichTextPainter::List richText;
             RichTextPainter::CustomRichText_t newRichText;
-            newRichText.highlight = false;
+            newRichText.underline = false;
             QString command = getCellContent(rowBase + rowOffset, col);
 
             //handle comments
@@ -296,7 +296,7 @@ QString ScriptView::paintContent(QPainter* painter, dsint rowBase, int rowOffset
             if(comment.length())
             {
                 RichTextPainter::CustomRichText_t newRichText;
-                newRichText.highlight = false;
+                newRichText.underline = false;
                 newRichText.flags = RichTextPainter::FlagNone;
                 newRichText.text = " ";
                 richText.push_back(newRichText); //space
@@ -382,8 +382,8 @@ void ScriptView::setupContextMenu()
 {
     mMenu = new MenuBuilder(this);
     MenuBuilder* loadMenu = new MenuBuilder(this);
-    loadMenu->addAction(makeShortcutAction(DIcon("folder-horizontal-open.png"), tr("&Open..."), SLOT(openFile()), "ActionLoadScript"));
-    loadMenu->addAction(makeShortcutAction(DIcon("binary_paste.png"), tr("&Paste"), SLOT(paste()), "ActionBinaryPaste"), [](QMenu*)
+    loadMenu->addAction(makeShortcutAction(DIcon("folder-horizontal-open"), tr("&Open..."), SLOT(openFile()), "ActionLoadScript"));
+    loadMenu->addAction(makeShortcutAction(DIcon("binary_paste"), tr("&Paste"), SLOT(paste()), "ActionBinaryPaste"), [](QMenu*)
     {
         return QApplication::clipboard()->mimeData()->hasText();
     });
@@ -393,7 +393,7 @@ void ScriptView::setupContextMenu()
         mMRUList->appendMenu(menu);
         return true;
     }));
-    mMenu->addMenu(makeMenu(DIcon("load-script.png"), tr("Load Script")), loadMenu);
+    mMenu->addMenu(makeMenu(DIcon("load-script"), tr("Load Script")), loadMenu);
     auto isempty = [this](QMenu*)
     {
         return getRowCount() != 0;
@@ -402,18 +402,21 @@ void ScriptView::setupContextMenu()
     {
         return getRowCount() != 0 && !filename.isEmpty();
     };
-    mMenu->addAction(makeShortcutAction(DIcon("arrow-restart.png"), tr("Re&load Script"), SLOT(reload()), "ActionReloadScript"), isemptyclipboard);
-    mMenu->addAction(makeShortcutAction(DIcon("control-exit.png"), tr("&Unload Script"), SLOT(unload()), "ActionUnloadScript"), isempty);
-    mMenu->addAction(makeShortcutAction(DIcon("edit-script.png"), tr("&Edit Script"), SLOT(edit()), "ActionEditScript"), isemptyclipboard);
+    mMenu->addAction(makeShortcutAction(DIcon("arrow-restart"), tr("Re&load Script"), SLOT(reload()), "ActionReloadScript"), isemptyclipboard);
+    mMenu->addAction(makeShortcutAction(DIcon("control-exit"), tr("&Unload Script"), SLOT(unload()), "ActionUnloadScript"), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("edit-script"), tr("&Edit Script"), SLOT(edit()), "ActionEditScript"), isemptyclipboard);
     mMenu->addSeparator();
-    mMenu->addAction(makeShortcutAction(DIcon("breakpoint_toggle.png"), tr("Toggle &BP"), SLOT(bpToggle()), "ActionToggleBreakpointScript"), isempty);
-    mMenu->addAction(makeShortcutAction(DIcon("arrow-run-cursor.png"), tr("Ru&n until selection"), SLOT(runCursor()), "ActionRunToCursorScript"), isempty);
-    mMenu->addAction(makeShortcutAction(DIcon("arrow-step-into.png"), tr("&Step"), SLOT(step()), "ActionStepScript"), isempty);
-    mMenu->addAction(makeShortcutAction(DIcon("arrow-run.png"), tr("&Run"), SLOT(run()), "ActionRunScript"), isempty);
-    mMenu->addAction(makeShortcutAction(DIcon("control-stop.png"), tr("&Abort"), SLOT(abort()), "ActionAbortScript"), isempty);
-    mMenu->addAction(makeAction(DIcon("neworigin.png"), tr("&Continue here..."), SLOT(newIp())), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("breakpoint_toggle"), tr("Toggle &BP"), SLOT(bpToggle()), "ActionToggleBreakpointScript"), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("arrow-run-cursor"), tr("Ru&n until selection"), SLOT(runCursor()), "ActionRunToCursorScript"), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("arrow-step-into"), tr("&Step"), SLOT(step()), "ActionStepScript"), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("arrow-run"), tr("&Run"), SLOT(run()), "ActionRunScript"), isempty);
+    mMenu->addAction(makeShortcutAction(DIcon("control-stop"), tr("&Abort"), SLOT(abort()), "ActionAbortScript"), isempty);
+    mMenu->addAction(makeAction(DIcon("neworigin"), tr("&Continue here..."), SLOT(newIp())), isempty);
     mMenu->addSeparator();
-    mMenu->addAction(makeShortcutAction(DIcon("terminal-command.png"), tr("E&xecute Command..."), SLOT(cmdExec()), "ActionExecuteCommandScript"));
+    MenuBuilder* copyMenu = new MenuBuilder(this);
+    setupCopyMenu(copyMenu);
+    mMenu->addMenu(makeMenu(DIcon("copy"), tr("Copy")), copyMenu);
+    mMenu->addAction(makeShortcutAction(DIcon("terminal-command"), tr("E&xecute Command..."), SLOT(cmdExec()), "ActionExecuteCommandScript"));
 }
 
 bool ScriptView::isScriptCommand(QString text, QString cmd, QString & mnemonic, QString & argument)
@@ -474,7 +477,8 @@ void ScriptView::error(int line, QString message)
     msg->setIcon(QMessageBox::Critical);
     msg->setWindowTitle(title);
     msg->setText(message);
-    msg->setWindowIcon(DIcon("script-error.png"));
+    msg->setStandardButtons(QMessageBox::Ok);
+    msg->setWindowIcon(DIcon("script-error"));
     msg->show();
 }
 
@@ -585,7 +589,7 @@ void ScriptView::message(QString message)
     msg->setWindowTitle(tr("Message"));
     msg->setText(message);
     msg->setStandardButtons(QMessageBox::Ok);
-    msg->setWindowIcon(DIcon("information.png"));
+    msg->setWindowIcon(DIcon("information"));
     msg->show();
 }
 
@@ -604,7 +608,7 @@ void ScriptView::question(QString message)
     msg->setWindowTitle(tr("Question"));
     msg->setText(message);
     msg->setStandardButtons(QMessageBox::Yes | QMessageBox::No);
-    msg->setWindowIcon(DIcon("question.png"));
+    msg->setWindowIcon(DIcon("question"));
     msg->show();
 }
 
@@ -618,7 +622,7 @@ void ScriptView::messageResult(int result)
     Bridge::getBridge()->setResult(BridgeResult::ScriptMessage, result == QMessageBox::Yes);
 }
 
-void ScriptView::closeSlot()
+void ScriptView::shutdownSlot()
 {
     msg->close();
     unload();

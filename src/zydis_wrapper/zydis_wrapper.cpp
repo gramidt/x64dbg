@@ -399,7 +399,7 @@ bool Zydis::IsBranchType(std::underlying_type_t<BranchType> bt) const
 ZydisMnemonic Zydis::GetId() const
 {
     if(!Success())
-        DebugBreak();
+        return ZYDIS_MNEMONIC_INVALID;
     return mInstr.mnemonic;
 }
 
@@ -560,7 +560,7 @@ bool Zydis::IsNop() const
     case ZYDIS_MNEMONIC_JRCXZ:
     case ZYDIS_MNEMONIC_JS:
     case ZYDIS_MNEMONIC_JZ:
-        // jmp 0
+        // jmp $0
         return ops[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE
                && ops[0].imm.value.u == this->Address() + this->Size();
     case ZYDIS_MNEMONIC_SHL:
@@ -607,15 +607,29 @@ bool Zydis::IsUnusual() const
 
     auto id = mInstr.mnemonic;
     return mInstr.attributes & ZYDIS_ATTRIB_IS_PRIVILEGED
-           || id == ZYDIS_MNEMONIC_RDTSC
+           || mInstr.meta.category == ZYDIS_CATEGORY_IO
+           || mInstr.meta.category == ZYDIS_CATEGORY_IOSTRINGOP
+           || mInstr.meta.category == ZYDIS_CATEGORY_RDWRFSGS
+           || mInstr.meta.category == ZYDIS_CATEGORY_SGX
+           || mInstr.meta.category == ZYDIS_CATEGORY_INTERRUPT
            || id == ZYDIS_MNEMONIC_SYSCALL
            || id == ZYDIS_MNEMONIC_SYSENTER
            || id == ZYDIS_MNEMONIC_CPUID
+           || id == ZYDIS_MNEMONIC_RDTSC
            || id == ZYDIS_MNEMONIC_RDTSCP
            || id == ZYDIS_MNEMONIC_RDRAND
            || id == ZYDIS_MNEMONIC_RDSEED
+           || id == ZYDIS_MNEMONIC_RDPID
+           || id == ZYDIS_MNEMONIC_RDPKRU
+           // || id == ZYDIS_MNEMONIC_RDPRU
            || id == ZYDIS_MNEMONIC_UD1
-           || id == ZYDIS_MNEMONIC_UD2;
+           || id == ZYDIS_MNEMONIC_UD2
+           || id == ZYDIS_MNEMONIC_VMCALL
+           || id == ZYDIS_MNEMONIC_VMFUNC
+           || id == ZYDIS_MNEMONIC_OUTSB
+           || id == ZYDIS_MNEMONIC_OUTSW
+           || id == ZYDIS_MNEMONIC_OUTSD
+           || id == ZYDIS_MNEMONIC_WRPKRU;
 }
 
 std::string Zydis::Mnemonic() const
@@ -691,6 +705,24 @@ size_t Zydis::ResolveOpValue(int opindex, const std::function<size_t(ZydisRegist
     return dest;
 }
 
+Zydis::VectorElementType Zydis::getVectorElementType(int opindex) const
+{
+    if(!Success())
+        return Zydis::VETDefault;
+    if(opindex >= mInstr.operandCount)
+        return Zydis::VETDefault;
+    const auto & op = mInstr.operands[opindex];
+    switch(op.elementType)
+    {
+    case ZYDIS_ELEMENT_TYPE_FLOAT32:
+        return Zydis::VETFloat32;
+    case ZYDIS_ELEMENT_TYPE_FLOAT64:
+        return Zydis::VETFloat64;
+    default:
+        return Zydis::VETDefault;
+    }
+}
+
 bool Zydis::IsBranchGoingToExecute(size_t cflags, size_t ccx) const
 {
     if(!Success())
@@ -748,11 +780,11 @@ bool Zydis::IsBranchGoingToExecute(ZydisMnemonic id, size_t cflags, size_t ccx)
     case ZYDIS_MNEMONIC_JS: //jump short if sign
         return bSF;
     case ZYDIS_MNEMONIC_LOOP: //decrement count; jump short if ecx!=0
-        return ccx != 0;
+        return ccx != 1;
     case ZYDIS_MNEMONIC_LOOPE: //decrement count; jump short if ecx!=0 and zf=1
-        return ccx != 0 && bZF;
+        return ccx != 1 && bZF;
     case ZYDIS_MNEMONIC_LOOPNE: //decrement count; jump short if ecx!=0 and zf=0
-        return ccx != 0 && !bZF;
+        return ccx != 1 && !bZF;
     default:
         return false;
     }

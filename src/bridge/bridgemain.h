@@ -50,6 +50,10 @@ extern "C"
 /// <returns>On error it returns a non-null error message.</returns>
 BRIDGE_IMPEXP const wchar_t* BridgeInit();
 
+BRIDGE_IMPEXP HMODULE WINAPI BridgeLoadLibraryCheckedW(const wchar_t* szDll, bool allowFailure);
+
+BRIDGE_IMPEXP HMODULE WINAPI BridgeLoadLibraryCheckedA(const char* szDll, bool allowFailure);
+
 /// <summary>
 /// Start the bridge.
 /// </summary>
@@ -129,6 +133,17 @@ BRIDGE_IMPEXP int BridgeGetDbgVersion();
 /// </summary>
 /// <returns>true if the process is elevated, false otherwise.</returns>
 BRIDGE_IMPEXP bool BridgeIsProcessElevated();
+
+/// <summary>
+/// Gets the NT build number from the operating system.
+/// </summary>
+/// <returns>NtBuildNumber</returns>
+BRIDGE_IMPEXP unsigned int BridgeGetNtBuildNumber();
+
+/// <summary>
+/// Returns the user directory (without trailing backslash).
+/// </summary>
+BRIDGE_IMPEXP const wchar_t* BridgeUserDirectory();
 
 #ifdef __cplusplus
 }
@@ -319,6 +334,8 @@ typedef enum
     DBG_ANALYZE_FUNCTION,           // param1=BridgeCFGraphList* graph,  param2=duint entry
     DBG_MENU_PREPARE,               // param1=int hMenu,                 param2=unused
     DBG_GET_SYMBOL_INFO,            // param1=void* symbol,              param2=SYMBOLINFO* info
+    DBG_GET_DEBUG_ENGINE,           // param1=unused,                    param2-unused
+    DBG_GET_SYMBOL_INFO_AT,         // param1=duint addr,                param2=SYMBOLINFO* info
 } DBGMSG;
 
 typedef enum
@@ -421,7 +438,9 @@ typedef enum
     size_byte = 1,
     size_word = 2,
     size_dword = 4,
-    size_qword = 8
+    size_qword = 8,
+    size_xmmword = 16,
+    size_ymmword = 32
 } MEMORY_SIZE;
 
 typedef enum
@@ -510,6 +529,19 @@ typedef enum
     sym_export,
     sym_symbol
 } SYMBOLTYPE;
+
+typedef enum
+{
+    mod_user,
+    mod_system
+} MODULEPARTY;
+
+typedef enum
+{
+    DebugEngineTitanEngine,
+    DebugEngineGleeBug,
+    DebugEngineStaticEngine,
+} DEBUG_ENGINE;
 
 //Debugger typedefs
 typedef MEMORY_SIZE VALUE_SIZE;
@@ -1038,6 +1070,8 @@ BRIDGE_IMPEXP duint DbgGetTebAddress(DWORD ThreadId);
 BRIDGE_IMPEXP bool DbgAnalyzeFunction(duint entry, BridgeCFGraphList* graph);
 BRIDGE_IMPEXP duint DbgEval(const char* expression, bool* DEFAULT_PARAM(success, nullptr));
 BRIDGE_IMPEXP void DbgGetSymbolInfo(const SYMBOLPTR* symbolptr, SYMBOLINFO* info);
+BRIDGE_IMPEXP DEBUG_ENGINE DbgGetDebugEngine();
+BRIDGE_IMPEXP bool DbgGetSymbolInfoAt(duint addr, SYMBOLINFO* info);
 
 //Gui defines
 typedef enum
@@ -1179,6 +1213,13 @@ typedef enum
     GUI_UPDATE_TRACE_BROWSER,       // param1=unused,               param2=unused
     GUI_INVALIDATE_SYMBOL_SOURCE,   // param1=duint base,           param2=unused
     GUI_GET_CURRENT_GRAPH,          // param1=BridgeCFGraphList*,   param2=unused
+    GUI_SHOW_REF,                   // param1=unused,               param2=unused
+    GUI_SELECT_IN_SYMBOLS_TAB,      // param1=duint addr,           param2=unused
+    GUI_GOTO_TRACE,                 // param1=duint index,          param2=unused
+    GUI_SHOW_TRACE,                 // param1=unused,               param2=unused
+    GUI_GET_MAIN_THREAD_ID,         // param1=unused,               param2=unused
+    GUI_ADD_MSG_TO_LOG_HTML,        // param1=(const char*)msg,     param2=unused
+    GUI_IS_LOG_ENABLED,             // param1=unused,               param2=unused
 } GUIMSG;
 
 //GUI Typedefs
@@ -1246,6 +1287,7 @@ BRIDGE_IMPEXP void GuiDisasmAt(duint addr, duint cip);
 BRIDGE_IMPEXP void GuiSetDebugState(DBGSTATE state);
 BRIDGE_IMPEXP void GuiSetDebugStateFast(DBGSTATE state);
 BRIDGE_IMPEXP void GuiAddLogMessage(const char* msg);
+BRIDGE_IMPEXP void GuiAddLogMessageHtml(const char* msg);
 BRIDGE_IMPEXP void GuiLogClear();
 BRIDGE_IMPEXP void GuiUpdateAllViews();
 BRIDGE_IMPEXP void GuiUpdateRegisterView();
@@ -1340,6 +1382,7 @@ BRIDGE_IMPEXP duint GuiGraphAt(duint addr);
 BRIDGE_IMPEXP void GuiUpdateGraphView();
 BRIDGE_IMPEXP void GuiDisableLog();
 BRIDGE_IMPEXP void GuiEnableLog();
+BRIDGE_IMPEXP bool GuiIsLogEnabled();
 BRIDGE_IMPEXP void GuiAddFavouriteTool(const char* name, const char* description);
 BRIDGE_IMPEXP void GuiAddFavouriteCommand(const char* name, const char* shortcut);
 BRIDGE_IMPEXP void GuiSetFavouriteToolShortcut(const char* name, const char* shortcut);
@@ -1359,10 +1402,66 @@ BRIDGE_IMPEXP void GuiOpenTraceFile(const char* fileName);
 BRIDGE_IMPEXP void GuiInvalidateSymbolSource(duint base);
 BRIDGE_IMPEXP void GuiExecuteOnGuiThreadEx(GUICALLBACKEX cbGuiThread, void* userdata);
 BRIDGE_IMPEXP void GuiGetCurrentGraph(BridgeCFGraphList* graphList);
+BRIDGE_IMPEXP void GuiShowReferences();
+BRIDGE_IMPEXP void GuiSelectInSymbolsTab(duint addr);
+BRIDGE_IMPEXP void GuiGotoTrace(duint index);
+BRIDGE_IMPEXP void GuiShowTrace();
+BRIDGE_IMPEXP DWORD GuiGetMainThreadId();
 
 #ifdef __cplusplus
 }
 #endif
+
+// Some useful C++ wrapper classes
+#ifdef __cplusplus
+
+class GuiDisableLogScope
+{
+    bool wasEnabled;
+
+public:
+    GuiDisableLogScope(const GuiDisableLogScope &) = delete;
+
+    GuiDisableLogScope()
+    {
+        wasEnabled = GuiIsLogEnabled();
+        if(wasEnabled)
+            GuiDisableLog();
+    }
+
+    ~GuiDisableLogScope()
+    {
+        if(wasEnabled)
+            GuiEnableLog();
+    }
+};
+
+class GuiDisableUpdateScope
+{
+    bool updateAfter;
+    bool wasEnabled;
+
+public:
+    GuiDisableUpdateScope(const GuiDisableUpdateScope &) = delete;
+
+    explicit GuiDisableUpdateScope(bool updateAfter = true)
+        : updateAfter(updateAfter)
+    {
+        wasEnabled = !GuiIsUpdateDisabled();
+        if(wasEnabled)
+            GuiUpdateDisable();
+    }
+
+    ~GuiDisableUpdateScope()
+    {
+        if(wasEnabled)
+            GuiUpdateEnable(updateAfter);
+    }
+};
+
+class GuiDisableScope : GuiDisableUpdateScope, GuiDisableLogScope { };
+
+#endif // __cplusplus
 
 #pragma pack(pop)
 

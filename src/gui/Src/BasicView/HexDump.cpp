@@ -134,7 +134,9 @@ void HexDump::updateDumpSlot()
                 {
                     mUpdateCache = cur;
                     mUpdateCacheData.swap(mUpdateCacheTemp);
+#ifdef DEBUG
                     OutputDebugStringA(QString("[x64dbg] %1[%2] %3[%4]").arg(ToPtrString(mUpdateCache.memBase)).arg(ToHexString(mUpdateCache.memSize)).arg(ToPtrString(mUpdateCache.rva)).arg(ToHexString(mUpdateCache.size)).toUtf8().constData());
+#endif // DEBUG
                 }
             }
         }
@@ -293,19 +295,19 @@ QString HexDump::makeCopyText()
 void HexDump::setupCopyMenu()
 {
     // Copy -> Data
-    mCopySelection = new QAction(DIcon("copy_selection.png"), tr("&Selected lines"), this);
+    mCopySelection = new QAction(DIcon("copy_selection"), tr("&Selected lines"), this);
     connect(mCopySelection, SIGNAL(triggered(bool)), this, SLOT(copySelectionSlot()));
     mCopySelection->setShortcutContext(Qt::WidgetShortcut);
     addAction(mCopySelection);
 
     // Copy -> Address
-    mCopyAddress = new QAction(DIcon("copy_address.png"), tr("&Address"), this);
+    mCopyAddress = new QAction(DIcon("copy_address"), tr("&Address"), this);
     connect(mCopyAddress, SIGNAL(triggered()), this, SLOT(copyAddressSlot()));
     mCopyAddress->setShortcutContext(Qt::WidgetShortcut);
     addAction(mCopyAddress);
 
     // Copy -> RVA
-    mCopyRva = new QAction(DIcon("copy_address.png"), "&RVA", this);
+    mCopyRva = new QAction(DIcon("copy_address"), "&RVA", this);
     connect(mCopyRva, SIGNAL(triggered()), this, SLOT(copyRvaSlot()));
     mCopyRva->setShortcutContext(Qt::WidgetShortcut);
     addAction(mCopyRva);
@@ -540,10 +542,18 @@ void HexDump::mouseReleaseEvent(QMouseEvent* event)
         AbstractTableView::mouseReleaseEvent(event);
 }
 
+void HexDump::wheelEvent(QWheelEvent* event)
+{
+    if(event->modifiers() == Qt::NoModifier)
+        AbstractTableView::wheelEvent(event);
+    else if(event->modifiers() == Qt::ControlModifier) // Zoom
+        Config()->zoomFont("HexDump", event);
+}
+
 void HexDump::keyPressEvent(QKeyEvent* event)
 {
     int key = event->key();
-    dsint selStart = getInitialSelection();
+    auto selStart = getInitialSelection();
     char granularity = 1; //Size of a data word.
     char action = 0; //Where to scroll the scrollbar
     Qt::KeyboardModifiers modifiers = event->modifiers();
@@ -555,7 +565,7 @@ void HexDump::keyPressEvent(QKeyEvent* event)
             break;
         }
     }
-    if(modifiers == 0) //No modifier
+    if(modifiers == Qt::NoModifier)
     {
         //selStart -= selStart % granularity; //Align the selection to word boundary. TODO: Unaligned data?
         switch(key)
@@ -624,6 +634,8 @@ void HexDump::keyPressEvent(QKeyEvent* event)
             action = 0;
             verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
             break;
+        default:
+            AbstractTableView::keyPressEvent(event);
         }
         if(action != 0)
         {
@@ -635,6 +647,10 @@ void HexDump::keyPressEvent(QKeyEvent* event)
     else if(modifiers == Qt::ShiftModifier)
     {
         //TODO
+    }
+    else
+    {
+        AbstractTableView::keyPressEvent(event);
     }
     /*
         Let's keep the old code for a while until nobody remembers previous behaviour.
@@ -761,16 +777,16 @@ bool HexDump::isSelected(dsint rva) const
 void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & richText)
 {
     RichTextPainter::CustomRichText_t curData;
-    curData.highlight = false;
+    curData.underline = false;
     curData.flags = RichTextPainter::FlagAll;
     curData.textColor = mTextColor;
     curData.textBackground = Qt::transparent;
-    curData.highlightColor = Qt::transparent;
+    curData.underlineColor = Qt::transparent;
 
     RichTextPainter::CustomRichText_t spaceData;
-    spaceData.highlight = false;
+    spaceData.underline = false;
     spaceData.flags = RichTextPainter::FlagNone;
-    spaceData.highlightColor = Qt::transparent;
+    spaceData.underlineColor = Qt::transparent;
 
     if(!col) //address
     {
@@ -822,19 +838,19 @@ void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & rich
                     if(wI % sizeof(duint) == 0 && wByteCount == 1 && desc.data.byteMode == HexByte) //pointer underlining
                     {
                         auto ptr = *(duint*)(wData + wI * wByteCount);
-                        if(spaceData.highlight = curData.highlight = DbgMemIsValidReadPtr(ptr))
+                        if(spaceData.underline = curData.underline = DbgMemIsValidReadPtr(ptr))
                         {
                             auto codePage = DbgFunctions()->MemIsCodePage(ptr, false);
                             auto modbase = DbgFunctions()->ModBaseFromAddr(ptr);
                             if(modbase)
                             {
                                 if(DbgFunctions()->ModGetParty(modbase) == 1) //system
-                                    spaceData.highlightColor = curData.highlightColor = codePage ? mSystemModuleCodePointerHighlightColor : mSystemModuleDataPointerHighlightColor;
+                                    spaceData.underlineColor = curData.underlineColor = codePage ? mSystemModuleCodePointerHighlightColor : mSystemModuleDataPointerHighlightColor;
                                 else //user
-                                    spaceData.highlightColor = curData.highlightColor = codePage ? mUserModuleCodePointerHighlightColor : mUserModuleDataPointerHighlightColor;
+                                    spaceData.underlineColor = curData.underlineColor = codePage ? mUserModuleCodePointerHighlightColor : mUserModuleDataPointerHighlightColor;
                             }
                             else
-                                spaceData.highlightColor = curData.highlightColor = codePage ? mUnknownCodePointerHighlightColor : mUnknownDataPointerHighlightColor;
+                                spaceData.underlineColor = curData.underlineColor = codePage ? mUnknownCodePointerHighlightColor : mUnknownDataPointerHighlightColor;
                         }
                     }
                     richText.push_back(curData);
@@ -842,7 +858,7 @@ void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & rich
                     {
                         spaceData.text = QString(' ');
                         if(wI % sizeof(duint) == sizeof(duint) - 1)
-                            spaceData.highlight = false;
+                            spaceData.underline = false;
                         richText.push_back(spaceData);
                     }
                 }
@@ -853,6 +869,24 @@ void HexDump::getColumnRichText(int col, dsint rva, RichTextPainter::List & rich
                         curData.text.append(' ');
                     richText.push_back(curData);
                 }
+            }
+        }
+
+        auto dataStartAddr = rvaToVa(rva);
+        auto dataEndAddr = dataStartAddr + wBufferByteCount - 1;
+
+        if(mUnderlineRangeStartVa && mUnderlineRangeEndVa)
+        {
+            // Check if the highlight ranges overlap
+            if(mUnderlineRangeStartVa <= dataEndAddr && dataStartAddr <= mUnderlineRangeEndVa)
+            {
+                for(RichTextPainter::CustomRichText_t & token : richText)
+                {
+                    token.underline = true;
+                    token.underlineColor = token.textColor;
+                }
+                while(richText.back().text == QStringLiteral(" "))
+                    richText.pop_back();
             }
         }
 
@@ -1149,9 +1183,9 @@ void HexDump::twordToString(duint rva, void* tword, TwordViewMode mode, RichText
     richText.text = wStr;
 }
 
-int HexDump::getSizeOf(DataSize size)
+size_t HexDump::getSizeOf(DataSize size)
 {
-    return int(size);
+    return size_t(size);
 }
 
 static int getStringMaxLength(HexDump::DataDescriptor desc)

@@ -33,7 +33,7 @@ SearchListView::SearchListView(QWidget* parent, AbstractSearchList* abstractSear
             listLayout->addWidget(abstractSearchList->searchList());
 
             // Add list placeholder
-            QWidget* listPlaceholder = new QWidget();
+            QWidget* listPlaceholder = new QWidget(this);
             listPlaceholder->setLayout(listLayout);
 
             barSplitter->addWidget(listPlaceholder);
@@ -68,7 +68,7 @@ SearchListView::SearchListView(QWidget* parent, AbstractSearchList* abstractSear
             horzLayout->addWidget(mRegexCheckbox);
 
             // Add searchbar placeholder
-            QWidget* horzPlaceholder = new QWidget();
+            QWidget* horzPlaceholder = new QWidget(this);
             horzPlaceholder->setLayout(horzLayout);
 
             barSplitter->addWidget(horzPlaceholder);
@@ -99,7 +99,7 @@ SearchListView::SearchListView(QWidget* parent, AbstractSearchList* abstractSear
         mSearchBox->setWindowTitle(parent->metaObject()->className());
 
     // Setup search menu action
-    mSearchAction = new QAction(DIcon("find.png"), tr("Search..."), this);
+    mSearchAction = new QAction(DIcon("find"), tr("Search..."), this);
     connect(mSearchAction, SIGNAL(triggered()), this, SLOT(searchSlot()));
 
     // https://wiki.qt.io/Delay_action_to_wait_for_user_interaction
@@ -231,7 +231,7 @@ void SearchListView::filterEntries()
     // Do not highlight with regex
     // TODO: fully respect highlighting mode
     if(mRegexCheckbox->checkState() == Qt::Unchecked)
-        mAbstractSearchList->searchList()->setHighlightText(mFilterText);
+        mAbstractSearchList->searchList()->setHighlightText(mFilterText, mSearchStartCol);
     else
         mAbstractSearchList->searchList()->setHighlightText(QString());
 
@@ -300,7 +300,7 @@ void SearchListView::listContextMenu(const QPoint & pos)
     wMenu.addSeparator();
     wMenu.addAction(mSearchAction);
     QMenu wCopyMenu(tr("&Copy"), this);
-    wCopyMenu.setIcon(DIcon("copy.png"));
+    wCopyMenu.setIcon(DIcon("copy"));
     mCurList->setupCopyMenu(&wCopyMenu);
     if(wCopyMenu.actions().length())
         wMenu.addMenu(&wCopyMenu);
@@ -377,9 +377,8 @@ bool SearchListView::eventFilter(QObject* obj, QEvent* event)
         }
 
         // Printable characters go to the search box
-        char key = keyEvent->text().toUtf8().constData()[0];
-
-        if(isprint(key))
+        QString keyText = keyEvent->text();
+        if(!keyText.isEmpty() && QChar(keyText.toUtf8().at(0)).isPrint())
             return QWidget::eventFilter(obj, event);
 
         // By default, all other keys are forwarded to the search view
@@ -393,5 +392,6 @@ void SearchListView::searchSlot()
 {
     FlickerThread* thread = new FlickerThread(mSearchBox, this);
     connect(thread, SIGNAL(setStyleSheet(QString)), mSearchBox, SLOT(setStyleSheet(QString)));
+    connect(thread, SIGNAL(finished()), thread, SLOT(deleteLater()));
     thread->start();
 }

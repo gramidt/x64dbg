@@ -1,11 +1,10 @@
-#ifndef MEMORYMAPVIEW_H
-#define MEMORYMAPVIEW_H
+#pragma once
 
-#include "StdTable.h"
+#include "StdIconTable.h"
 
 class GotoDialog;
 
-class MemoryMapView : public StdTable
+class MemoryMapView : public StdIconTable
 {
     Q_OBJECT
 public:
@@ -21,6 +20,7 @@ public slots:
     void stateChangedSlot(DBGSTATE state);
     void followDumpSlot();
     void followDisassemblerSlot();
+    void followSymbolsSlot();
     void doubleClickedSlot();
     void memoryExecuteSingleshootToggleSlot();
     void memoryAllocateSlot();
@@ -31,6 +31,7 @@ public slots:
     void refreshMap();
     void findPatternSlot();
     void dumpMemory();
+    void loadMemory();
     void commentSlot();
     void selectAddress(duint va);
     void gotoOriginSlot();
@@ -41,16 +42,39 @@ public slots:
     void disassembleAtSlot(dsint va, dsint cip);
 
 private:
-    QString getProtectionString(DWORD Protect);
+    enum
+    {
+        ColAddress = 0,
+        ColSize,
+        ColParty,
+        ColPageInfo,
+        ColContent,
+        ColAllocation,
+        ColCurProtect,
+        ColAllocProtect
+    };
+
+    inline duint getSelectionAddr()
+    {
+        return getCellUserdata(getInitialSelection(), ColAddress);
+    }
+
+    inline QString getSelectionText()
+    {
+        return getCellContent(getInitialSelection(), ColAddress);
+    }
+
     QAction* makeCommandAction(QAction* action, const QString & command);
 
     GotoDialog* mGoto = nullptr;
 
     QAction* mFollowDump;
     QAction* mFollowDisassembly;
+    QAction* mFollowSymbols;
     QAction* mSwitchView;
     QAction* mPageMemoryRights;
     QAction* mDumpMemory;
+    QAction* mLoadMemory;
 
     QMenu* mBreakpointMenu;
     QMenu* mMemoryAccessMenu;
@@ -80,5 +104,3 @@ private:
 
     duint mCipBase;
 };
-
-#endif // MEMORYMAPVIEW_H

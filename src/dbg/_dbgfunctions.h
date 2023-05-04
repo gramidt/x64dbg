@@ -184,8 +184,8 @@ typedef bool (*ENUMHANDLES)(ListOf(HANDLEINFO) handles);
 typedef bool (*GETHANDLENAME)(duint handle, char* name, size_t nameSize, char* typeName, size_t typeNameSize);
 typedef bool (*ENUMTCPCONNECTIONS)(ListOf(TCPCONNECTIONINFO) connections);
 typedef duint(*GETDBGEVENTS)();
-typedef int (*MODGETPARTY)(duint base);
-typedef void (*MODSETPARTY)(duint base, int party);
+typedef MODULEPARTY(*MODGETPARTY)(duint base);
+typedef void (*MODSETPARTY)(duint base, MODULEPARTY party);
 typedef bool(*WATCHISWATCHDOGTRIGGERED)(unsigned int id);
 typedef bool(*MEMISCODEPAGE)(duint addr, bool refresh);
 typedef bool(*ANIMATECOMMAND)(const char* command);
@@ -207,6 +207,7 @@ typedef int(*SYMAUTOCOMPLETE)(const char* Search, char** Buffer, int MaxSymbols)
 typedef void(*REFRESHMODULELIST)();
 typedef duint(*GETADDRFROMLINEEX)(duint mod, const char* szSourceFile, int line);
 typedef MODULESYMBOLSTATUS(*MODSYMBOLSTATUS)(duint mod);
+typedef void(*GETCALLSTACKBYTHREAD)(HANDLE thread, DBGCALLSTACK* callstack);
 
 //The list of all the DbgFunctions() return value.
 //WARNING: This list is append only. Do not insert things in the middle or plugins would break.
@@ -285,6 +286,7 @@ typedef struct DBGFUNCTIONS_
     REFRESHMODULELIST RefreshModuleList;
     GETADDRFROMLINEEX GetAddrFromLineEx;
     MODSYMBOLSTATUS ModSymbolStatus;
+    GETCALLSTACKBYTHREAD GetCallStackByThread;
 } DBGFUNCTIONS;
 
 #ifdef BUILD_DBG

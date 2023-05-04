@@ -1,5 +1,4 @@
-#ifndef THREADVIEW_H
-#define THREADVIEW_H
+#pragma once
 
 #include "StdTable.h"
 #include <QMenu>
@@ -22,8 +21,6 @@ public slots:
 
 private:
     QAction* makeCommandAction(QAction* action, const QString & command);
-    QString mCurrentThreadId;
+    duint mCurrentThreadId;
     MenuBuilder* mMenuBuilder;
 };
-
-#endif // THREADVIEW_H

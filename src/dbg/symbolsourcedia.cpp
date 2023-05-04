@@ -97,6 +97,12 @@ bool SymbolSourceDIA::cancelLoading()
     return true;
 }
 
+void SymbolSourceDIA::waitUntilLoaded()
+{
+    while(isLoading())
+        Sleep(10);
+}
+
 template<size_t Count>
 static bool startsWith(const char* str, const char(&prefix)[Count])
 {
@@ -205,8 +211,8 @@ bool SymbolSourceDIA::loadSymbolsAsync()
             SymbolInfo & sym = _symData[addrIndex.index];
             if(prev && sym.rva == prev->rva && sym.decoratedName == prev->decoratedName && sym.undecoratedName == prev->undecoratedName)
             {
-                sym.decoratedName.swap(String());
-                sym.undecoratedName.swap(String());
+                String().swap(sym.decoratedName);
+                String().swap(sym.undecoratedName);
                 continue;
             }
             prev = &sym;
@@ -461,17 +467,35 @@ bool SymbolSourceDIA::findSymbolExactOrLower(duint rva, SymbolInfo & symInfo)
         return true;
     }
 
-    return nullptr;
+    return false;
 }
 
-void SymbolSourceDIA::enumSymbols(const CbEnumSymbol & cbEnum)
+void SymbolSourceDIA::enumSymbols(const CbEnumSymbol & cbEnum, duint beginRva, duint endRva)
 {
     if(!_symbolsLoaded)
         return;
 
-    for(auto & it : _symAddrMap)
+    if(_symAddrMap.empty())
+        return;
+
+    if(beginRva > endRva)
+        return;
+
+    AddrIndex find;
+    find.addr = beginRva;
+    find.index = -1;
+    auto it = std::lower_bound(_symAddrMap.begin(), _symAddrMap.end(), find);
+    if(it == _symAddrMap.end())
+        return;
+
+    for(; it != _symAddrMap.end(); it++)
     {
-        const SymbolInfo & sym = _symData[it.index];
+        const SymbolInfo & sym = _symData[it->index];
+        if(sym.rva > endRva)
+        {
+            break;
+        }
+
         if(!cbEnum(sym))
         {
             break;

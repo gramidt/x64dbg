@@ -1,14 +1,18 @@
-#ifndef CALLSTACKVIEW_H
-#define CALLSTACKVIEW_H
+#pragma once
 
-#include "StdTable.h"
+#include "StdIconTable.h"
+class CommonActions;
 
-class CallStackView : public StdTable
+class CallStackView : public StdIconTable
 {
     Q_OBJECT
 public:
     explicit CallStackView(StdTable* parent = 0);
     void setupContextMenu();
+    duint getSelectionVa();
+
+protected:
+    QString paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h) override;
 
 protected slots:
     void updateCallStack();
@@ -19,7 +23,18 @@ protected slots:
     void showSuspectedCallStack();
 
 private:
-    MenuBuilder* mMenuBuilder;
-};
+    enum
+    {
+        ColThread = 0,
+        ColAddress,
+        ColTo,
+        ColFrom,
+        ColSize,
+        ColParty,
+        ColComment
+    };
 
-#endif // CALLSTACKVIEW_H
+    MenuBuilder* mMenuBuilder;
+    CommonActions* mCommonActions;
+    bool isSelectionValid();
+};

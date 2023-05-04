@@ -114,6 +114,15 @@ void SymUpdateModuleList()
     GuiSymbolUpdateModuleList((int)moduleCount, data);
 }
 
+static void SymSetProgress(int percentage, const char* pdbBaseFile)
+{
+    if(percentage == 0)
+        GuiAddStatusBarMessage(StringUtils::sprintf("%s\n", pdbBaseFile).c_str());
+    else
+        GuiAddStatusBarMessage(StringUtils::sprintf("%s %d%%\n", pdbBaseFile, percentage).c_str());
+    GuiSymbolSetProgress(percentage);
+}
+
 bool SymDownloadSymbol(duint Base, const char* SymbolStore)
 {
     struct DownloadBaseGuard
@@ -177,16 +186,16 @@ bool SymDownloadSymbol(duint Base, const char* SymbolStore)
 
     symprintf(QT_TRANSLATE_NOOP("DBG", "Downloading symbol %s\n  Signature: %s\n  Destination: %s\n  URL: %s\n"), pdbBaseFile, pdbSignature.c_str(), StringUtils::Utf16ToUtf8(destinationPath).c_str(), symbolUrl.c_str());
 
-    auto result = downslib_download(symbolUrl.c_str(), destinationPath.c_str(), "x64dbg", 1000, [](unsigned long long read_bytes, unsigned long long total_bytes)
+    auto result = downslib_download(symbolUrl.c_str(), destinationPath.c_str(), "x64dbg", 1000, [](void* userdata, unsigned long long read_bytes, unsigned long long total_bytes)
     {
         if(total_bytes)
         {
             auto progress = (double)read_bytes / (double)total_bytes;
-            GuiSymbolSetProgress((int)(progress * 100.0));
+            SymSetProgress((int)(progress * 100.0), (const char*)userdata);
         }
         return true;
-    });
-    GuiSymbolSetProgress(0);
+    }, (void*)pdbBaseFile);
+    SymSetProgress(0, pdbBaseFile);
 
     switch(result)
     {
@@ -302,7 +311,7 @@ bool SymAddrFromName(const char* Name, duint* Address)
     return false;
 }
 
-String SymGetSymbolicName(duint Address)
+String SymGetSymbolicName(duint Address, bool IncludeAddress)
 {
     //
     // This resolves an address to a module and symbol:
@@ -318,15 +327,29 @@ String SymGetSymbolicName(duint Address)
     {
         if(hasModule)
             return StringUtils::sprintf("%s.%p", modname, Address);
-        return "";
+        else if(IncludeAddress)
+            return StringUtils::sprintf("%p", Address);
+        else
+            return "";
     }
 
     if(hasModule)
-        return StringUtils::sprintf("<%s.%s>", modname, label);
-    return StringUtils::sprintf("<%s>", label);
+    {
+        if(IncludeAddress)
+            return StringUtils::sprintf("<%s.%s> (%p)", modname, label, Address);
+        else
+            return StringUtils::sprintf("<%s.%s>", modname, label);
+    }
+    else
+    {
+        if(IncludeAddress)
+            return StringUtils::sprintf("<%s> (%p)", label, Address);
+        else
+            return StringUtils::sprintf("<%s>", label);
+    }
 }
 
-bool SymGetSourceLine(duint Cip, char* FileName, int* Line, DWORD* disp)
+bool SymGetSourceLine(duint Cip, char* FileName, int* Line, duint* disp)
 {
     SHARED_ACQUIRE(LockModules);
     MODINFO* modInfo = ModInfoFromAddr(Cip);

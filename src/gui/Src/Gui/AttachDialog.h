@@ -1,9 +1,8 @@
-#ifndef ATTACHDIALOG_H
-#define ATTACHDIALOG_H
+#pragma once
 
 #include <QDialog>
 
-class StdSearchListView;
+class StdIconSearchListView;
 class QMenu;
 class QAction;
 
@@ -28,9 +27,16 @@ private slots:
 
 private:
     Ui::AttachDialog* ui;
-    StdSearchListView* mSearchListView;
+    StdIconSearchListView* mSearchListView;
     QAction* mAttachAction;
     QAction* mRefreshAction;
-};
 
-#endif // ATTACHDIALOG_H
+    enum
+    {
+        ColPid,
+        ColName,
+        ColTitle,
+        ColPath,
+        ColCommandLine,
+    };
+};

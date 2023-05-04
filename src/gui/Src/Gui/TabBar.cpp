@@ -24,7 +24,6 @@ MHTabBar::MHTabBar(QWidget* parent, bool allowDetach, bool allowDelete) : QTabBa
     setSelectionBehaviorOnRemove(QTabBar::SelectLeftTab);
     setMovable(true);
     setDrawBase(false);
-    setStyleSheet("QTabBar::tear { width: 0px; border: none; }");
 }
 
 //////////////////////////////////////////////////////////////
@@ -42,18 +41,18 @@ void MHTabBar::contextMenuEvent(QContextMenuEvent* event)
     QAction wDetach(tr("&Detach"), this);
     if(mAllowDetach)
         wMenu.addAction(&wDetach);
-    QAction wDelete(tr("&Delete"), this);
+    QAction wDelete(tr("&Close"), this);
     if(mAllowDelete)
         wMenu.addAction(&wDelete);
     QAction* executed = wMenu.exec(event->globalPos());
     if(executed == &wDetach)
     {
         QPoint p(0, 0);
-        OnDetachTab((int)tabAt(event->pos()), p);
+        emit OnDetachTab((int)tabAt(event->pos()), p);
     }
     else if(executed == &wDelete)
     {
-        OnDeleteTab((int)tabAt(event->pos()));
+        emit OnDeleteTab((int)tabAt(event->pos()));
     }
 }
 

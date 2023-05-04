@@ -1,6 +1,7 @@
 #pragma once
 
 #include "_global.h"
+#include "expressionfunctions.h"
 
 namespace Exprfunc
 {
@@ -13,6 +14,7 @@ namespace Exprfunc
     duint modrva(duint addr);
     duint modheaderva(duint addr);
     duint modisexport(duint addr);
+    bool modbasefromname(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
 
     duint disasmsel();
     duint dumpsel();
@@ -21,6 +23,7 @@ namespace Exprfunc
     duint peb();
     duint teb();
     duint tid();
+    duint kusd();
 
     duint bswap(duint value);
     duint ternary(duint condition, duint value1, duint value2);
@@ -48,10 +51,13 @@ namespace Exprfunc
     duint disnext(duint addr);
     duint disprev(duint addr);
     duint disiscallsystem(duint addr);
+    bool dismnemonic(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool distext(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool dismatch(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
 
     duint trenabled(duint addr);
     duint trhitcount(duint addr);
-    duint trisruntraceenabled();
+    duint trisrecording();
     duint gettickcount();
 
     duint readbyte(duint addr);
@@ -79,4 +85,12 @@ namespace Exprfunc
     duint exflags();
     duint exinfocount();
     duint exinfo(duint index);
+
+    bool streq(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool strieq(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool strstr(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool stristr(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool strlen(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool utf16(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
+    bool utf8(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata);
 }

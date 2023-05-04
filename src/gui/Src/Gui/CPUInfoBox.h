@@ -1,16 +1,17 @@
-#ifndef INFOBOX_H
-#define INFOBOX_H
+#pragma once
 
 #include "StdTable.h"
 
 class WordEditDialog;
 class XrefBrowseDialog;
+class QBeaEngine;
 
 class CPUInfoBox : public StdTable
 {
     Q_OBJECT
 public:
-    explicit CPUInfoBox(StdTable* parent = 0);
+    explicit CPUInfoBox(QWidget* parent = 0);
+    ~CPUInfoBox();
     int getHeight();
     void addFollowMenuItem(QMenu* menu, QString name, duint value);
     void setupFollowMenu(QMenu* menu, duint wVA);
@@ -19,6 +20,8 @@ public:
     void addWatchMenuItem(QMenu* menu, QString name, duint value);
     void setupWatchMenu(QMenu* menu, duint wVA);
     int followInDump(dsint wVA);
+
+    static QString formatSSEOperand(const QByteArray & data, unsigned char vectorType);
 
 public slots:
     void disasmSelectionChanged(dsint parVA);
@@ -43,11 +46,10 @@ private:
     void setupContextMenu();
     void setupShortcuts();
     XrefBrowseDialog* mXrefDlg = nullptr;
+    QBeaEngine* mDisasm;
 
     QAction* mCopyAddressAction;
     QAction* mCopyRvaAction;
     QAction* mCopyOffsetAction;
     QAction* mCopyLineAction;
 };
-
-#endif // INFOBOX_H

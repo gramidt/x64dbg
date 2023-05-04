@@ -5,7 +5,6 @@
 #include "CachedFontMetrics.h"
 #include "Bridge.h"
 #include "DisassemblyPopup.h"
-#include <windows.h>
 #include "MethodInvoker.h"
 
 int AbstractTableView::mMouseWheelScrollDelta = 0;
@@ -47,7 +46,7 @@ AbstractTableView::AbstractTableView(QWidget* parent)
 
     mRowCount = 0;
 
-    mHeaderButtonSytle.setStyleSheet(" QPushButton {\n     background-color: rgb(192, 192, 192);\n     border-style: outset;\n     border-width: 2px;\n     border-color: rgb(128, 128, 128);\n }\n QPushButton:pressed {\n     background-color: rgb(192, 192, 192);\n     border-style: inset;\n }");
+    mHeaderButtonSytle.setObjectName("AbstractTableViewHeader");
 
     mNbrOfLineToPrint = 0;
 
@@ -58,6 +57,8 @@ AbstractTableView::AbstractTableView(QWidget* parent)
     mShouldReload = true;
     mAllowPainting = true;
     mDrawDebugOnly = false;
+    mPopupEnabled = true;
+    mPopupTimer = 0;
 
     // ScrollBar Init
     setVerticalScrollBar(new AbstractTableScrollBar(verticalScrollBar()));
@@ -66,28 +67,7 @@ AbstractTableView::AbstractTableView(QWidget* parent)
     horizontalScrollBar()->setRange(0, 0);
     horizontalScrollBar()->setPageStep(650);
     if(mMouseWheelScrollDelta == 0)
-    {
-        //Initialize scroll delta from registry. Windows-specific
-        HKEY hDesktop;
-        if(RegOpenKeyExW(HKEY_CURRENT_USER, L"Control Panel\\Desktop\\", 0, STANDARD_RIGHTS_READ | KEY_QUERY_VALUE, &hDesktop) != ERROR_SUCCESS)
-            mMouseWheelScrollDelta = 4; // Failed to open the registry. Use a default value;
-        else
-        {
-            wchar_t Data[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-            DWORD regType = 0;
-            DWORD cbData = sizeof(Data) - sizeof(wchar_t);
-            if(RegQueryValueExW(hDesktop, L"WheelScrollLines", nullptr, &regType, (LPBYTE)&Data, &cbData) == ERROR_SUCCESS)
-            {
-                if(regType == REG_SZ) // Don't process other types of data
-                    mMouseWheelScrollDelta = _wtoi(Data);
-                if(mMouseWheelScrollDelta == 0)
-                    mMouseWheelScrollDelta = 4; // Malformed registry value. Use a default value.
-            }
-            else
-                mMouseWheelScrollDelta = 4; // Failed to query the registry. Use a default value;
-            RegCloseKey(hDesktop);
-        }
-    }
+        mMouseWheelScrollDelta = QApplication::wheelScrollLines();
     setMouseTracking(true);
 
     // Slots
@@ -95,16 +75,17 @@ AbstractTableView::AbstractTableView(QWidget* parent)
     connect(Config(), SIGNAL(colorsUpdated()), this, SLOT(updateColorsSlot()));
     connect(Config(), SIGNAL(fontsUpdated()), this, SLOT(updateFontsSlot()));
     connect(Config(), SIGNAL(shortcutsUpdated()), this, SLOT(updateShortcutsSlot()));
-    connect(Bridge::getBridge(), SIGNAL(close()), this, SLOT(closeSlot()));
+    connect(Bridge::getBridge(), SIGNAL(shutdown()), this, SLOT(shutdownSlot()));
 
     // todo: try Qt::QueuedConnection to init
     Initialize();
 }
 
-void AbstractTableView::closeSlot()
+void AbstractTableView::shutdownSlot()
 {
     if(ConfigBool("Gui", "SaveColumnOrder"))
         saveColumnToConfig();
+    setAllowPainting(false);
 }
 
 /************************************************************************************
@@ -158,7 +139,18 @@ void AbstractTableView::updateColorsSlot()
 
 void AbstractTableView::updateFontsSlot()
 {
+    auto oldCharWidth = getCharWidth();
     updateFonts();
+    auto newCharWidth = getCharWidth();
+
+    // Scale the column widths to the new font
+    for(int col = 0; col < getColumnCount(); col++)
+    {
+        auto width = getColumnWidth(col);
+        auto charCount = width / oldCharWidth;
+        auto padding = width % oldCharWidth;
+        setColumnWidth(col, charCount * newCharWidth + padding);
+    }
 }
 
 void AbstractTableView::updateShortcutsSlot()
@@ -208,6 +200,13 @@ void AbstractTableView::setupColumnConfigDefaultValue(QMap<QString, duint> & map
     }
 }
 
+void AbstractTableView::editColumnDialog()
+{
+    ColumnReorderDialog reorderDialog(this);
+    reorderDialog.setWindowTitle(tr("Edit columns"));
+    reorderDialog.exec();
+}
+
 /************************************************************************************
                             Painting Stuff
 ************************************************************************************/
@@ -220,6 +219,15 @@ void AbstractTableView::setupColumnConfigDefaultValue(QMap<QString, duint> & map
  */
 void AbstractTableView::paintEvent(QPaintEvent* event)
 {
+    Q_UNUSED(event);
+
+    QPainter wPainter(this->viewport());
+    wPainter.setFont(font());
+
+    // Paint background
+    if(mBackgroundColor.alpha() == 255) // The secret code to allow the user to set a background image in style.css
+        wPainter.fillRect(wPainter.viewport(), QBrush(mBackgroundColor));
+
     if(!mAllowPainting)
         return;
 
@@ -245,8 +253,6 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
             setColumnWidth(last, getColumnWidth(last));
     }
 
-    Q_UNUSED(event);
-    QPainter wPainter(this->viewport());
     int wViewableRowsCount = getViewableRowsCount();
 
     int scrollValue = -horizontalScrollBar()->value();
@@ -263,10 +269,7 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
         mShouldReload = false;
     }
 
-    // Paints background
-    wPainter.fillRect(wPainter.viewport(), QBrush(mBackgroundColor));
-
-    // Paints header
+    // Paint header
     if(mHeader.isVisible == true)
     {
         for(int j = 0; j < getColumnCount(); j++)
@@ -316,7 +319,7 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
                     if(wStr.length())
                     {
                         wPainter.setPen(getCellColor(mTableOffset + i, j));
-                        wPainter.drawText(QRect(x + 4, y, getColumnWidth(j) - 4, getRowHeight()), Qt::AlignVCenter | Qt::AlignLeft, wStr);
+                        wPainter.drawText(QRect(x + 4, y, getColumnWidth(j) - 5, getRowHeight()), Qt::AlignVCenter | Qt::AlignLeft, wStr);
                     }
                 }
             }
@@ -335,7 +338,6 @@ void AbstractTableView::paintEvent(QPaintEvent* event)
         y = getHeaderHeight();
         x += getColumnWidth(j);
     }
-    //emit repainted();
 }
 
 /************************************************************************************
@@ -507,9 +509,7 @@ void AbstractTableView::mousePressEvent(QMouseEvent* event)
     {
         if(event->y() < getHeaderHeight())
         {
-            ColumnReorderDialog reorderDialog(this);
-            reorderDialog.setWindowTitle(tr("Edit columns"));
-            reorderDialog.exec();
+            editColumnDialog();
             event->accept();
         }
     }
@@ -572,9 +572,7 @@ void AbstractTableView::mouseDoubleClickEvent(QMouseEvent* event)
 {
     if(event->y() < getHeaderHeight())
     {
-        ColumnReorderDialog reorderDialog(this);
-        reorderDialog.setWindowTitle(tr("Edit columns"));
-        reorderDialog.exec();
+        editColumnDialog();
         event->accept();
     }
 }
@@ -590,25 +588,40 @@ void AbstractTableView::mouseDoubleClickEvent(QMouseEvent* event)
 
 void AbstractTableView::wheelEvent(QWheelEvent* event)
 {
-    int numDegrees = event->delta() / 8;
-    int numSteps = numDegrees / 15;
+    QPoint numDegrees = event->angleDelta() / 8;
+    QPoint numSteps = numDegrees / 15;
 
-    if(numSteps > 0)
+    if(event->modifiers() == Qt::NoModifier)
     {
-        if(mMouseWheelScrollDelta > 0)
-            for(int i = 0; i < mMouseWheelScrollDelta * numSteps; i++)
-                verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
-        else // -1 : one screen at a time
-            verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepSub);
+        if(numSteps.y() > 0)
+        {
+            if(mMouseWheelScrollDelta > 0)
+                for(int i = 0; i < mMouseWheelScrollDelta * numSteps.y(); i++)
+                    verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+            else // -1 : one screen at a time
+                verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepSub);
+        }
+        else if(numSteps.y() < 0)
+        {
+            if(mMouseWheelScrollDelta > 0)
+                for(int i = 0; i < mMouseWheelScrollDelta * numSteps.y() * -1; i++)
+                    verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+            else // -1 : one screen at a time
+                verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepAdd);
+        }
+        else if(numSteps.x() > 0)
+        {
+            for(int i = 0; i < 20 * numSteps.x(); i++)
+                horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepSub);
+        }
+        else if(numSteps.x() < 0)
+        {
+            for(int i = 0; i < 20 * numSteps.x() * -1; i++)
+                horizontalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
+        }
     }
-    else
-    {
-        if(mMouseWheelScrollDelta > 0)
-            for(int i = 0; i < mMouseWheelScrollDelta * numSteps * -1; i++)
-                verticalScrollBar()->triggerAction(QAbstractSlider::SliderSingleStepAdd);
-        else // -1 : one screen at a time
-            verticalScrollBar()->triggerAction(QAbstractSlider::SliderPageStepAdd);
-    }
+    else if(event->modifiers() == Qt::ControlModifier) // Zoom
+        Config()->zoomFont("AbstractTableView", event);
 }
 
 
@@ -650,7 +663,7 @@ void AbstractTableView::leaveEvent(QEvent* event)
 void AbstractTableView::keyPressEvent(QKeyEvent* event)
 {
     int wKey = event->key();
-    if(event->modifiers())
+    if(event->modifiers() != Qt::NoModifier && event->modifiers() != Qt::KeypadModifier)
         return;
 
     if(wKey == Qt::Key_Up)
@@ -1295,6 +1308,12 @@ void AbstractTableView::prepareData()
 /************************************************************************************
                          DisassemblyPopup
 ************************************************************************************/
+
+void AbstractTableView::setDisassemblyPopupEnabled(bool enable)
+{
+    mPopupEnabled = enable;
+}
+
 duint AbstractTableView::getDisassemblyPopupAddress(int mousex, int mousey)
 {
     Q_UNUSED(mousex)
@@ -1304,8 +1323,10 @@ duint AbstractTableView::getDisassemblyPopupAddress(int mousex, int mousey)
 
 void AbstractTableView::ShowDisassemblyPopup(duint addr, int x, int y)
 {
-    if(!addr)
+    if(!mPopupEnabled || !addr)
     {
+        killTimer(mPopupTimer);
+        mPopupTimer = 0;
         if(mDisassemblyPopup)
             mDisassemblyPopup->hide();
         return;
@@ -1318,10 +1339,27 @@ void AbstractTableView::ShowDisassemblyPopup(duint addr, int x, int y)
     {
         mDisassemblyPopup->move(mapToGlobal(QPoint(x + 20, y + fontMetrics().height() * 2)));
         mDisassemblyPopup->setAddress(addr);
-        mDisassemblyPopup->show();
+        //mDisassemblyPopup->show();
+        if(mPopupTimer == 0)
+            mPopupTimer = startTimer(QApplication::startDragTime());
     }
     else
+    {
         mDisassemblyPopup->hide();
+        killTimer(mPopupTimer);
+        mPopupTimer = 0;
+    }
+}
+
+void AbstractTableView::timerEvent(QTimerEvent* event)
+{
+    if(event->timerId() == mPopupTimer)
+    {
+        mDisassemblyPopup->show();
+        killTimer(mPopupTimer);
+        mPopupTimer = 0;
+    }
+    QAbstractScrollArea::timerEvent(event);
 }
 
 void AbstractTableView::hideEvent(QHideEvent* event)

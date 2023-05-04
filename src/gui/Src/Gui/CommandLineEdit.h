@@ -1,5 +1,4 @@
-#ifndef COMMANDLINEEDIT_H
-#define COMMANDLINEEDIT_H
+#pragma once
 
 #include "Bridge/bridgemain.h"
 #include "HistoryLineEdit.h"
@@ -39,7 +38,6 @@ private:
     QStringListModel* mCompleterModel;
     QList<SCRIPTTYPEINFO> mScriptInfo;
     QStringList mDefaultCompletions;
+    bool mDefaultCompletionsUpdated = false;
     int mCurrentScriptIndex;
 };
-
-#endif // COMMANDLINEEDIT_H
