@@ -70,6 +70,7 @@ static CookieQuery cookie;
 static duint exceptionDispatchAddr = 0;
 static bool bPausedOnException = false;
 static HANDLE DebugDLLFileMapping = 0;
+static DWORD nextContinueStatus = DBG_EXCEPTION_NOT_HANDLED;
 char szProgramDir[MAX_PATH] = "";
 char szUserDir[MAX_PATH] = "";
 char szDebuggeePath[MAX_PATH] = "";
@@ -83,7 +84,7 @@ bool bUndecorateSymbolNames = true;
 bool bEnableSourceDebugging = false;
 bool bSkipInt3Stepping = false;
 bool bIgnoreInconsistentBreakpoints = false;
-bool bNoForegroundWindow = false;
+bool bNoForegroundWindow = true;
 bool bVerboseExceptionLogging = true;
 bool bNoWow64SingleStepWorkaround = false;
 bool bTraceBrowserNeedsUpdate = false;
@@ -916,8 +917,9 @@ static void cbGenericBreakpoint(BP_TYPE bptype, const void* ExceptionAddress = n
     }
     else
     {
+        // NOTE: This behavior was changed in a breaking way, but too many people were confused
         if(breakCondition != -1)
-            commandCondition = breakCondition; //if no condition is set, execute the command when the debugger would break
+            commandCondition = 1; // If no condition is set, always execute the command
         else
             commandCondition = 0; // Don't execute any command if an error occurs
     }
@@ -1261,8 +1263,8 @@ void cbRtrStep()
 #endif //_WIN64
                )
         {
-            Zydis cp;
-            if(cp.Disassemble(cip, data) && cp.IsRet())
+            Zydis zydis;
+            if(zydis.Disassemble(cip, data) && zydis.IsRet())
                 reachedReturn = true;
         }
     }
@@ -2059,7 +2061,7 @@ static void cbException(EXCEPTION_DEBUG_INFO* ExceptionData)
             else
                 dprintf(QT_TRANSLATE_NOOP("DBG", "First chance exception on %p (%.8X)!\n"), addr, ExceptionCode);
         }
-        SetNextDbgContinueStatus(filter.handledBy == ExceptionHandledBy::Debuggee ? DBG_EXCEPTION_NOT_HANDLED : DBG_CONTINUE);
+        dbgsetcontinuestatus(filter.handledBy == ExceptionHandledBy::Debuggee ? DBG_EXCEPTION_NOT_HANDLED : DBG_CONTINUE);
         if((bSkipExceptions || filter.breakOn != ExceptionBreakOn::FirstChance) && (!maxSkipExceptionCount || ++skipExceptionCount < maxSkipExceptionCount))
             return;
     }
@@ -2073,7 +2075,7 @@ static void cbException(EXCEPTION_DEBUG_INFO* ExceptionData)
                 dprintf(QT_TRANSLATE_NOOP("DBG", "Last chance exception on %p (%.8X)!\n"), addr, ExceptionCode);
         }
         // DBG_EXCEPTION_NOT_HANDLED kills the process on a last chance exception, so only pass this if the user really asked for it
-        SetNextDbgContinueStatus(filter.breakOn == ExceptionBreakOn::DoNotBreak && filter.handledBy == ExceptionHandledBy::Debuggee ? DBG_EXCEPTION_NOT_HANDLED : DBG_CONTINUE);
+        dbgsetcontinuestatus(filter.breakOn == ExceptionBreakOn::DoNotBreak && filter.handledBy == ExceptionHandledBy::Debuggee ? DBG_EXCEPTION_NOT_HANDLED : DBG_CONTINUE);
     }
     if(filter.breakOn == ExceptionBreakOn::DoNotBreak)
         return;
@@ -2094,6 +2096,7 @@ static void cbException(EXCEPTION_DEBUG_INFO* ExceptionData)
 
 static void cbDebugEvent(DEBUG_EVENT* DebugEvent)
 {
+    nextContinueStatus = DBG_EXCEPTION_NOT_HANDLED;
     hActiveThread = ThreadGetHandle(((DEBUG_EVENT*)GetDebugData())->dwThreadId);
     InterlockedIncrement((volatile long*)&DbgEvents);
     PLUG_CB_DEBUGEVENT debugEventInfo;
@@ -2732,7 +2735,7 @@ static void debugLoopFunction(INIT_STRUCT* init)
     else
     {
         gInitExe = StringUtils::Utf8ToUtf16(init->exe);
-        strcpy_s(szDebuggeePath, init->exe);
+        strncpy_s(szDebuggeePath, init->exe.c_str(), _TRUNCATE);
     }
 
     pDebuggedEntry = GetPE32DataW(gInitExe.c_str(), 0, UE_OEP);
@@ -3007,6 +3010,17 @@ String formatpidtid(DWORD pidtid)
         return StringUtils::sprintf("%u", pidtid);
 }
 
+void dbgsetcontinuestatus(DWORD status)
+{
+    nextContinueStatus = status;
+    SetNextDbgContinueStatus(status);
+}
+
+DWORD dbggetcontinuestatus()
+{
+    return nextContinueStatus;
+}
+
 bool dbgrestartadmin()
 {
     wchar_t wszProgramPath[MAX_PATH] = L"";
@@ -3044,7 +3058,7 @@ void StepIntoWow64(TITANCBSTEP callback)
         }
     }
 #endif //_WIN64
-    if(bPausedOnException && exceptionDispatchAddr && !IsBPXEnabled(exceptionDispatchAddr))
+    if(bPausedOnException && dbggetcontinuestatus() == DBG_EXCEPTION_NOT_HANDLED && exceptionDispatchAddr && !IsBPXEnabled(exceptionDispatchAddr))
     {
         SetBPX(exceptionDispatchAddr, UE_SINGLESHOOT, callback);
     }
@@ -3056,7 +3070,7 @@ void StepIntoWow64(TITANCBSTEP callback)
 
 void StepOverWrapper(TITANCBSTEP callback)
 {
-    if(bPausedOnException && exceptionDispatchAddr && !IsBPXEnabled(exceptionDispatchAddr))
+    if(bPausedOnException && dbggetcontinuestatus() == DBG_EXCEPTION_NOT_HANDLED && exceptionDispatchAddr && !IsBPXEnabled(exceptionDispatchAddr))
     {
         SetBPX(exceptionDispatchAddr, UE_SINGLESHOOT, callback);
     }

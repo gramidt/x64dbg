@@ -6,7 +6,7 @@
 
 class TraceFileParser;
 class TraceFilePage;
-class QBeaEngine;
+class QZydis;
 struct Instruction_t;
 
 #define MAX_MEMORY_OPERANDS 32
@@ -20,7 +20,7 @@ public:
     bool Open(const QString & fileName);
     void Close();
     bool Delete();
-    bool isError() const;
+    bool isError(QString & reason) const;
     int Progress() const;
 
     QString getIndexText(unsigned long long index) const;
@@ -64,6 +64,7 @@ private:
     std::vector<std::pair<unsigned long long, Range>> fileIndex; //index;<file offset;length>
     std::atomic<int> progress;
     bool error;
+    QString errorMessage;
     TraceFilePage* lastAccessedPage;
     unsigned long long lastAccessedIndexOffset;
     friend class TraceFileParser;
@@ -73,5 +74,5 @@ private:
     std::map<Range, TraceFilePage, RangeCompare> pages;
     TraceFilePage* getPage(unsigned long long index, unsigned long long* base);
 
-    QBeaEngine* mDisasm;
+    QZydis* mDisasm;
 };

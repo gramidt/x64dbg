@@ -33,7 +33,7 @@ void WatchView::updateWatch()
     BridgeList<WATCHINFO> WatchList;
     DbgGetWatchList(&WatchList);
     setRowCount(WatchList.Count());
-    if(getInitialSelection() >= WatchList.Count() && WatchList.Count() > 0)
+    if(getInitialSelection() >= (duint)WatchList.Count() && WatchList.Count() > 0)
         setSingleSelection(WatchList.Count() - 1);
     for(int i = 0; i < WatchList.Count(); i++)
     {
@@ -181,10 +181,9 @@ QString WatchView::getSelectedId()
     return QChar('.') + getCellContent(getInitialSelection(), ColId);
 }
 
-QString WatchView::paintContent(QPainter* painter, dsint rowBase, int rowOffset, int col, int x, int y, int w, int h)
+QString WatchView::paintContent(QPainter* painter, duint row, duint col, int x, int y, int w, int h)
 {
-    QString ret = StdTable::paintContent(painter, rowBase, rowOffset, col, x, y, w, h);
-    const dsint row = rowBase + rowOffset;
+    QString ret = StdTable::paintContent(painter, row, col, x, y, w, h);
     if(row != getInitialSelection() && DbgFunctions()->WatchIsWatchdogTriggered(getCellContent(row, ColId).toUInt()))
     {
         painter->fillRect(QRect(x, y, w, h), mWatchTriggeredBackgroundColor);
@@ -200,9 +199,9 @@ QString WatchView::paintContent(QPainter* painter, dsint rowBase, int rowOffset,
 
 void WatchView::contextMenuSlot(const QPoint & pos)
 {
-    QMenu wMenu(this);
-    mMenu->build(&wMenu);
-    wMenu.exec(mapToGlobal(pos));
+    QMenu menu(this);
+    mMenu->build(&menu);
+    menu.exec(mapToGlobal(pos));
 }
 
 void WatchView::addWatchSlot()
@@ -233,7 +232,7 @@ void WatchView::modifyWatchSlot()
     BridgeList<WATCHINFO> WatchList;
     DbgGetWatchList(&WatchList);
     auto sel = getInitialSelection();
-    if(sel > WatchList.Count())
+    if(sel > (duint)WatchList.Count())
         return;
     WordEditDialog modifyDialog(this);
     modifyDialog.setup(tr("Modify \"%1\"").arg(QString(WatchList[sel].WatchName)), WatchList[sel].value, sizeof(duint));

@@ -28,9 +28,9 @@ enum class ExceptionHandledBy
 struct INIT_STRUCT
 {
     HANDLE event = nullptr;
-    char* exe = nullptr;
-    char* commandline = nullptr;
-    char* currentfolder = nullptr;
+    std::string exe;
+    std::string commandline;
+    std::string currentfolder;
     DWORD pid = 0;
     bool attach = false;
 };
@@ -109,6 +109,8 @@ bool dbgdeletedllbreakpoint(const char* mod, DWORD type);
 void dbgsetdebugflags(DWORD flags);
 void dbgcreatedebugthread(INIT_STRUCT* init);
 String formatpidtid(DWORD pidtid);
+void dbgsetcontinuestatus(DWORD status);
+DWORD dbggetcontinuestatus();
 
 void cbStep();
 void cbRtrStep();

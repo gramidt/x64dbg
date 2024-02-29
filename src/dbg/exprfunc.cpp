@@ -11,6 +11,7 @@
 #include "value.h"
 #include "TraceRecord.h"
 #include "exhandlerinfo.h"
+#include "exception.h"
 #include <vector>
 #include <regex>
 #include <string>
@@ -189,9 +190,11 @@ namespace Exprfunc
         return result;
     }
 
-    duint ternary(duint condition, duint value1, duint value2)
+    bool ternary(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
     {
-        return condition ? value1 : value2;
+        *result = argv[0].number ? argv[1] : argv[2];
+        result->string.isOwner = false;
+        return true;
     }
 
     duint memvalid(duint addr)
@@ -282,9 +285,9 @@ namespace Exprfunc
         unsigned char data[16];
         if(MemRead(addr, data, sizeof(data), nullptr, true))
         {
-            Zydis cp;
-            if(cp.Disassemble(addr, data))
-                return cp.IsNop();
+            Zydis zydis;
+            if(zydis.Disassemble(addr, data))
+                return zydis.IsNop();
         }
         return false;
     }
@@ -294,9 +297,9 @@ namespace Exprfunc
         unsigned char data[16];
         if(MemRead(addr, data, sizeof(data), nullptr, true))
         {
-            Zydis cp;
-            if(cp.Disassemble(addr, data))
-                return cp.IsUnusual();
+            Zydis zydis;
+            if(zydis.Disassemble(addr, data))
+                return zydis.IsUnusual();
         }
         return false;
     }
@@ -453,6 +456,11 @@ namespace Exprfunc
         return GetTickCount();
     }
 
+    duint rdtsc()
+    {
+        return (duint)__rdtsc();
+    }
+
     static duint readMem(duint addr, duint size)
     {
         duint value = 0;
@@ -600,6 +608,31 @@ namespace Exprfunc
         return getLastExceptionInfo().ExceptionRecord.ExceptionInformation[index];
     }
 
+    duint isprocessfocused(DWORD process)
+    {
+        HWND foreground = GetForegroundWindow();
+        if(foreground)
+        {
+            DWORD pid;
+            DWORD tid = GetWindowThreadProcessId(foreground, &pid);
+            return pid == process;
+        }
+        else
+            return 0;
+    }
+
+    duint isdebuggerfocused()
+    {
+        return isprocessfocused(GetCurrentProcessId());
+    }
+
+    duint isdebuggeefocused()
+    {
+        if(!DbgIsDebugging())
+            return 0;
+        return isprocessfocused(fdProcessInfo->dwProcessId);
+    }
+
     bool streq(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
     {
         assert(argc == 2);
@@ -657,16 +690,85 @@ namespace Exprfunc
         return true;
     }
 
-    bool utf16(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    template<bool Strict>
+    bool ansi(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
     {
-        assert(argc == 1);
+        assert(argc >= 1);
         assert(argv[0].type == ValueTypeNumber);
 
         duint addr = argv[0].number;
 
-        std::vector<wchar_t> tempStr(MAX_STRING_SIZE + 1);
-        duint NumberOfBytesRead = 0;
-        if(!MemRead(addr, tempStr.data(), sizeof(wchar_t) * (tempStr.size() - 1), &NumberOfBytesRead) && NumberOfBytesRead == 0)
+        std::vector<char> tempStr;
+        if(argc > 1)
+        {
+            assert(argv[1].type == ValueTypeNumber);
+            tempStr.resize(argv[1].number + 1);
+        }
+        else
+        {
+            tempStr.resize(MAX_STRING_SIZE + 1);
+        }
+
+        duint NumberOfBytesRead = -1;
+        if(!MemRead(addr, tempStr.data(), tempStr.size() - 1, &NumberOfBytesRead) && NumberOfBytesRead == -1 && Strict)
+        {
+            return false;
+        }
+
+        *result = ValueString(StringUtils::LocalCpToUtf8(tempStr.data()));
+        return true;
+    }
+
+    template<bool Strict>
+    bool utf8(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        assert(argc >= 1);
+        assert(argv[0].type == ValueTypeNumber);
+
+        duint addr = argv[0].number;
+
+        std::vector<char> tempStr;
+        if(argc > 1)
+        {
+            assert(argv[1].type == ValueTypeNumber);
+            tempStr.resize(argv[1].number + 1);
+        }
+        else
+        {
+            tempStr.resize(MAX_STRING_SIZE + 1);
+        }
+
+        duint NumberOfBytesRead = -1;
+        if(!MemRead(addr, tempStr.data(), tempStr.size() - 1, &NumberOfBytesRead) && NumberOfBytesRead == -1 && Strict)
+        {
+            return false;
+        }
+
+        *result = ValueString(tempStr.data());
+        return true;
+    }
+
+    template<bool Strict>
+    bool utf16(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        assert(argc >= 1);
+        assert(argv[0].type == ValueTypeNumber);
+
+        duint addr = argv[0].number;
+
+        std::vector<wchar_t> tempStr;
+        if(argc > 1)
+        {
+            assert(argv[1].type == ValueTypeNumber);
+            tempStr.resize(argv[1].number + 1);
+        }
+        else
+        {
+            tempStr.resize(MAX_STRING_SIZE + 1);
+        }
+
+        duint NumberOfBytesRead = -1;
+        if(!MemRead(addr, tempStr.data(), sizeof(wchar_t) * (tempStr.size() - 1), &NumberOfBytesRead) && NumberOfBytesRead == -1 && Strict)
         {
             return false;
         }
@@ -682,21 +784,49 @@ namespace Exprfunc
         return true;
     }
 
+    bool ansi(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        return ansi<false>(result, argc, argv, userdata);
+    }
+
+    bool ansi_strict(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        return ansi<true>(result, argc, argv, userdata);
+    }
+
     bool utf8(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
     {
-        assert(argc == 1);
-        assert(argv[0].type == ValueTypeNumber);
+        return utf8<false>(result, argc, argv, userdata);
+    }
 
-        duint addr = argv[0].number;
+    bool utf8_strict(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        return utf8<true>(result, argc, argv, userdata);
+    }
 
-        std::vector<char> tempStr(MAX_STRING_SIZE + 1);
-        duint NumberOfBytesRead = 0;
-        if(!MemRead(addr, tempStr.data(), tempStr.size() - 1, &NumberOfBytesRead) && NumberOfBytesRead == 0)
-        {
+    bool utf16(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        return utf16<false>(result, argc, argv, userdata);
+    }
+
+    bool utf16_strict(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        return utf16<true>(result, argc, argv, userdata);
+    }
+
+    bool syscall_name(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        *result = ValueString(SyscallToName(argv[0].number));
+        return true;
+    }
+
+    bool syscall_id(ExpressionValue* result, int argc, const ExpressionValue* argv, void* userdata)
+    {
+        auto id = SyscallToId(argv[0].string.ptr);
+        if(id == -1)
             return false;
-        }
 
-        *result = ValueString(tempStr.data());
+        *result = ValueNumber(id);
         return true;
     }
 }

@@ -18,7 +18,7 @@ class AppearanceDialog : public QDialog
     Q_OBJECT
 
 public:
-    explicit AppearanceDialog(QWidget* parent = 0);
+    explicit AppearanceDialog(QWidget* parent = nullptr);
     ~AppearanceDialog();
 
 private slots:
@@ -89,6 +89,8 @@ private:
         QString propertyName;
         QString colorName;
         QString backgroundColorName;
+        QString defaultBackgroundColorName;
+        QString defaultFontName;
     };
 
     QList<ColorInfo> colorInfoList;
@@ -101,10 +103,12 @@ private:
     QAction* defaultValueAction;
     QAction* currentSettingAction;
     QTreeWidgetItem* currentCategory;
+    QString currentBackgroundColorName;
+    QString currentFontName;
 
     bool isInit;
 
-    void colorInfoListCategory(QString categoryName);
+    void colorInfoListCategory(QString categoryName, const QString & currentBackgroundColorName, const QString & currentFontName);
     void colorInfoListAppend(QString propertyName, QString colorName, QString backgroundColorName);
     void colorInfoListInit();
     void fontInit();
