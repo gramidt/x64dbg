@@ -103,6 +103,8 @@ MainWindow::MainWindow(QWidget* parent)
     connect(Bridge::getBridge(), SIGNAL(symbolSelectModule(duint)), this, SLOT(displaySymbolWidget()));
     connect(Bridge::getBridge(), SIGNAL(closeApplication()), this, SLOT(close()));
     connect(Bridge::getBridge(), SIGNAL(showTraceBrowser()), this, SLOT(displayTraceWidget()));
+    connect(Bridge::getBridge(), SIGNAL(focusMemmap()), this, SLOT(displayMemMapWidget()));
+    connect(Bridge::getBridge(), SIGNAL(focusSymmod()), this, SLOT(displaySymbolWidget()));
 
     // Setup menu API
 
@@ -704,10 +706,6 @@ void MainWindow::themeTriggeredSlot()
 
 void MainWindow::setupThemesMenu()
 {
-    auto exists = [](const QString & str)
-    {
-        return QFile(str).exists();
-    };
     char selectedTheme[MAX_SETTING_SIZE];
     BridgeSettingGet("Theme", "Selected", selectedTheme);
     QDirIterator it(QString("%1/../themes").arg(QCoreApplication::applicationDirPath()), QDir::NoDotAndDotDot | QDir::Dirs);
@@ -721,6 +719,9 @@ void MainWindow::setupThemesMenu()
         // The Default theme folder is a hidden theme to override the default theme
         if(name == "Default")
             continue;
+        // Translation support for the built-in 'Dark' theme
+        if(name == "Dark")
+            name = tr("Dark");
         auto action = ui->menuTheme->addAction(name);
         connect(action, SIGNAL(triggered()), this, SLOT(themeTriggeredSlot()));
         action->setText(name);
@@ -2059,7 +2060,7 @@ void MainWindow::blog()
     msg.setDefaultButton(QMessageBox::Ok);
     if(msg.exec() != QMessageBox::Ok)
         return;
-    QDesktopServices::openUrl(QUrl("http://blog.x64dbg.com"));
+    QDesktopServices::openUrl(QUrl("https://blog.x64dbg.com"));
 }
 
 void MainWindow::reportBug()
@@ -2072,7 +2073,7 @@ void MainWindow::reportBug()
     msg.setDefaultButton(QMessageBox::Ok);
     if(msg.exec() != QMessageBox::Ok)
         return;
-    QDesktopServices::openUrl(QUrl("http://report.x64dbg.com"));
+    QDesktopServices::openUrl(QUrl("https://report.x64dbg.com"));
 }
 
 void MainWindow::crashDump()
@@ -2162,7 +2163,7 @@ void MainWindow::changeCommandLine()
 
 static void onlineManual()
 {
-    QDesktopServices::openUrl(QUrl("http://help.x64dbg.com"));
+    QDesktopServices::openUrl(QUrl("https://help.x64dbg.com"));
 }
 
 void MainWindow::displayManual()
@@ -2175,7 +2176,7 @@ void MainWindow::displayManual()
         {
             QMessageBox messagebox(QMessageBox::Critical, tr("Error"),
                                    tr("Manual cannot be opened. Please check if x64dbg.chm exists and ensure there is no other problems with your system.") + '\n'
-                                   + tr("Do you want to open online manual at http://help.x64dbg.com ?"),
+                                   + tr("Do you want to open online manual at https://help.x64dbg.com ?"),
                                    QMessageBox::Yes | QMessageBox::No);
             if(messagebox.exec() == QMessageBox::Yes)
                 onlineManual();
@@ -2260,7 +2261,7 @@ void MainWindow::dbgStateChangedSlot(DBGSTATE state)
 
 void MainWindow::on_actionFaq_triggered()
 {
-    QDesktopServices::openUrl(QUrl("http://faq.x64dbg.com"));
+    QDesktopServices::openUrl(QUrl("https://faq.x64dbg.com"));
 }
 
 void MainWindow::on_actionReloadStylesheet_triggered()
@@ -2450,7 +2451,7 @@ void MainWindow::clickFavouriteTool()
         }
         GuiAddLogMessage(tr("Starting tool %1\n").arg(toolPath).toUtf8().constData());
         PROCESS_INFORMATION procinfo;
-        STARTUPINFO startupinfo;
+        STARTUPINFOW startupinfo;
         memset(&procinfo, 0, sizeof(PROCESS_INFORMATION));
         memset(&startupinfo, 0, sizeof(startupinfo));
         startupinfo.cb = sizeof(startupinfo);
@@ -2725,7 +2726,7 @@ void MainWindow::onMenuCustomized()
 
 void MainWindow::on_actionPlugins_triggered()
 {
-    QDesktopServices::openUrl(QUrl("http://plugins.x64dbg.com"));
+    QDesktopServices::openUrl(QUrl("https://plugins.x64dbg.com"));
 }
 
 void MainWindow::on_actionCheckUpdates_triggered()

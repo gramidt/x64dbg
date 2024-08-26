@@ -1,9 +1,9 @@
+#include <QMessageBox>
+#include <QFileDialog>
 #include "TraceBrowser.h"
 #include "TraceWidget.h"
-#include "TraceFileReader.h"
 #include "TraceFileSearch.h"
 #include "RichTextPainter.h"
-#include "main.h"
 #include "BrowseDialog.h"
 #include "QZydis.h"
 #include "GotoDialog.h"
@@ -12,7 +12,6 @@
 #include "WordEditDialog.h"
 #include "CachedFontMetrics.h"
 #include "MRUList.h"
-#include <QFileDialog>
 
 TraceBrowser::TraceBrowser(TraceFileReader* traceFile, TraceWidget* parent) : AbstractTableView(parent), mTraceFile(traceFile)
 {
@@ -52,7 +51,7 @@ TraceBrowser::TraceBrowser(TraceFileReader* traceFile, TraceWidget* parent) : Ab
     connect(Bridge::getBridge(), SIGNAL(gotoTraceIndex(duint)), this, SLOT(gotoIndexSlot(duint)));
 
     connect(Config(), SIGNAL(tokenizerConfigUpdated()), this, SLOT(tokenizerConfigUpdatedSlot()));
-    connect(this, SIGNAL(selectionChanged(unsigned long long)), this, SLOT(selectionChangedSlot(unsigned long long)));
+    connect(this, SIGNAL(selectionChanged(TRACEINDEX)), this, SLOT(selectionChangedSlot(TRACEINDEX)));
     connect(Bridge::getBridge(), SIGNAL(close()), this, SLOT(closeFileSlot()));
     connect(getTraceFile(), SIGNAL(parseFinished()), this, SLOT(parseFinishedSlot()));
 }
@@ -753,7 +752,7 @@ NotDebuggingLabel:
     }
 }
 
-ZydisTokenizer::InstructionToken TraceBrowser::memoryTokens(unsigned long long atIndex)
+ZydisTokenizer::InstructionToken TraceBrowser::memoryTokens(TRACEINDEX atIndex)
 {
     duint MemoryAddress[MAX_MEMORY_OPERANDS];
     duint MemoryOldContent[MAX_MEMORY_OPERANDS];
@@ -773,13 +772,12 @@ ZydisTokenizer::InstructionToken TraceBrowser::memoryTokens(unsigned long long a
             ZydisTokenizer::TokenizeTraceMemory(MemoryAddress[i], MemoryOldContent[i], MemoryNewContent[i], tokens);
         }
 
-
         fakeInstruction.tokens.insert(fakeInstruction.tokens.begin(), tokens.begin(), tokens.end());
     }
-    return  fakeInstruction;
+    return fakeInstruction;
 }
 
-ZydisTokenizer::InstructionToken TraceBrowser::registersTokens(unsigned long long atIndex)
+ZydisTokenizer::InstructionToken TraceBrowser::registersTokens(TRACEINDEX atIndex)
 {
     ZydisTokenizer::InstructionToken fakeInstruction = ZydisTokenizer::InstructionToken();
     REGDUMP now = getTraceFile()->Registers(atIndex);
@@ -833,7 +831,7 @@ void TraceBrowser::setupRightClickContextMenu()
     mMenuBuilder = new MenuBuilder(this);
     mCommonActions = new CommonActions(this, getActionHelperFuncs(), [this]()
     {
-        return getTraceFile()->Registers(getInitialSelection()).regcontext.cip;
+        return getTraceFile()->Address(getInitialSelection());
     });
 
     auto mTraceFileNotNull = [](QMenu*)
@@ -858,6 +856,12 @@ void TraceBrowser::setupRightClickContextMenu()
     copyMenu->addAction(makeAction(DIcon("copy_address"), tr("Index"), SLOT(copyIndexSlot())));
 
     mMenuBuilder->addMenu(makeMenu(DIcon("copy"), tr("&Copy")), copyMenu);
+
+    mMenuBuilder->addMenu(makeMenu(DIcon("dump"), tr("&Follow in Dump")), [this](QMenu * menu)
+    {
+        mParent->setupFollowMenu(menu);
+        return true;
+    });
 
     mCommonActions->build(mMenuBuilder, CommonActions::ActionDisasm | CommonActions::ActionBreakpoint | CommonActions::ActionLabel | CommonActions::ActionComment | CommonActions::ActionBookmark);
     mMenuBuilder->addAction(makeShortcutAction(DIcon("highlight"), tr("&Highlighting mode"), SLOT(enableHighlightingModeSlot()), "ActionHighlightingMode"), mTraceFileNotNull);
@@ -900,7 +904,7 @@ void TraceBrowser::setupRightClickContextMenu()
         duint MemoryNewContent[MAX_MEMORY_OPERANDS];
         bool MemoryIsValid[MAX_MEMORY_OPERANDS];
         int MemoryOperandsCount;
-        unsigned long long index;
+        TRACEINDEX index;
 
         if(!isFileOpened())
             return false;
@@ -1055,12 +1059,12 @@ void TraceBrowser::mouseDoubleClickEvent(QMouseEvent* event)
             mCommonActions->followDisassemblySlot();
             break;
         case Address://Address: set RVA
-            if(mRvaDisplayEnabled && getTraceFile()->Registers(getInitialSelection()).regcontext.cip == mRvaDisplayBase)
+            if(mRvaDisplayEnabled && getTraceFile()->Address(getInitialSelection()) == mRvaDisplayBase)
                 mRvaDisplayEnabled = false;
             else
             {
                 mRvaDisplayEnabled = true;
-                mRvaDisplayBase = getTraceFile()->Registers(getInitialSelection()).regcontext.cip;
+                mRvaDisplayBase = getTraceFile()->Address(getInitialSelection());
             }
             reloadData();
             break;
@@ -1164,11 +1168,11 @@ void TraceBrowser::keyPressEvent(QKeyEvent* event)
         AbstractTableView::keyPressEvent(event);
 }
 
-void TraceBrowser::selectionChangedSlot(unsigned long long selection)
+void TraceBrowser::selectionChangedSlot(TRACEINDEX selection)
 {
     if(mTraceSyncCpu && isFileOpened())
     {
-        GuiDisasmAt(getTraceFile()->Registers(selection).regcontext.cip, 0);
+        GuiDisasmAt(getTraceFile()->Address(selection), 0);
     }
 }
 
@@ -1355,12 +1359,12 @@ void TraceBrowser::mnemonicHelpSlot()
     int size;
     getTraceFile()->OpCode(getInitialSelection(), data, &size);
     Zydis zydis;
-    zydis.Disassemble(getTraceFile()->Registers(getInitialSelection()).regcontext.cip, data);
+    zydis.Disassemble(getTraceFile()->Address(getInitialSelection()), data);
     DbgCmdExecDirect(QString("mnemonichelp %1").arg(zydis.Mnemonic().c_str()));
     emit displayLogWidget();
 }
 
-void TraceBrowser::disasm(unsigned long long index, bool history)
+void TraceBrowser::disasm(TRACEINDEX index, bool history)
 {
     setSingleSelection(index);
     makeVisible(index);
@@ -1372,9 +1376,10 @@ void TraceBrowser::disasm(unsigned long long index, bool history)
 
 void TraceBrowser::disasmByAddress(duint address, bool history)
 {
-    mParent->loadDumpFully();
+    if(!mParent->loadDumpFully())
+        return;
     auto references = getTraceFile()->getDump()->getReferences(address, address);
-    unsigned long long index;
+    TRACEINDEX index;
     bool found = false;
     if(references.empty())
     {
@@ -1402,7 +1407,7 @@ void TraceBrowser::disasmByAddress(duint address, bool history)
     {
         for(auto i : references)
         {
-            if(getTraceFile()->Registers(i).regcontext.cip == address)
+            if(getTraceFile()->Address(i) == address)
             {
                 if(found == false)
                 {
@@ -1476,7 +1481,7 @@ void TraceBrowser::gotoPreviousSlot()
 
 void TraceBrowser::gotoXrefSlot()
 {
-    emit xrefSignal(getTraceFile()->Registers(getInitialSelection()).regcontext.cip);
+    emit xrefSignal(getTraceFile()->Address(getInitialSelection()));
 }
 
 void TraceBrowser::copyCipSlot()
@@ -1486,7 +1491,7 @@ void TraceBrowser::copyCipSlot()
     {
         if(i != getSelectionStart())
             clipboard += "\r\n";
-        clipboard += ToPtrString(getTraceFile()->Registers(i).regcontext.cip);
+        clipboard += ToPtrString(getTraceFile()->Address(i));
     }
     Bridge::CopyToClipboard(clipboard);
 }
@@ -1512,7 +1517,7 @@ void TraceBrowser::pushSelectionInto(bool copyBytes, QTextStream & stream, QText
     const int memoryLen = getColumnWidth(Memory) / getCharWidth() - 1;
     if(htmlStream)
         *htmlStream << QString("<table style=\"border-width:0px;border-color:#000000;font-family:%1;font-size:%2px;\">").arg(font().family()).arg(getRowHeight());
-    for(unsigned long long i = getSelectionStart(); i <= getSelectionEnd(); i++)
+    for(TRACEINDEX i = getSelectionStart(); i <= getSelectionEnd(); i++)
     {
         if(i != getSelectionStart())
             stream << "\r\n";
@@ -1740,9 +1745,9 @@ void TraceBrowser::copyRvaSlot()
     if(getTraceFile() == nullptr)
         return;
 
-    for(unsigned long long i = getSelectionStart(); i <= getSelectionEnd(); i++)
+    for(TRACEINDEX i = getSelectionStart(); i <= getSelectionEnd(); i++)
     {
-        duint cip = getTraceFile()->Registers(i).regcontext.cip;
+        duint cip = getTraceFile()->Address(i);
         duint base = DbgFunctions()->ModBaseFromAddr(cip);
         if(base)
         {
@@ -1765,9 +1770,9 @@ void TraceBrowser::copyFileOffsetSlot()
     if(getTraceFile() == nullptr)
         return;
 
-    for(unsigned long long i = getSelectionStart(); i <= getSelectionEnd(); i++)
+    for(TRACEINDEX i = getSelectionStart(); i <= getSelectionEnd(); i++)
     {
-        duint cip = getTraceFile()->Registers(i).regcontext.cip;
+        duint cip = getTraceFile()->Address(i);
         cip = DbgFunctions()->VaToFileOffset(cip);
         if(cip)
         {
@@ -1802,10 +1807,11 @@ void TraceBrowser::exportSlot()
 
         case Address:
         {
+            duint cip = getTraceFile()->Address(row);
             if(!DbgIsDebugging())
-                return ToPtrString(getTraceFile()->Registers(row).regcontext.cip);
+                return ToPtrString(cip);
             else
-                return getAddrText(getTraceFile()->Registers(row).regcontext.cip, 0, true);
+                return getAddrText(cip, 0, true);
         }
 
         case Opcode:
@@ -1842,11 +1848,12 @@ void TraceBrowser::exportSlot()
                 QString comment;
                 bool autoComment = false;
                 char label[MAX_LABEL_SIZE] = "";
-                if(GetCommentFormat(getTraceFile()->Registers(row).regcontext.cip, comment, &autoComment))
+                duint cip = getTraceFile()->Address(row);
+                if(GetCommentFormat(cip, comment, &autoComment))
                 {
                     return QString(comment);
                 }
-                else if(DbgGetLabelAt(getTraceFile()->Registers(row).regcontext.cip, SEG_DEFAULT, label)) // label but no comment
+                else if(DbgGetLabelAt(cip, SEG_DEFAULT, label)) // label but no comment
                 {
                     return QString(label);
                 }
@@ -1873,14 +1880,15 @@ void TraceBrowser::searchConstantSlot()
     if(!isFileOpened())
         return;
     WordEditDialog constantDlg(this);
-    duint initialConstant = getTraceFile()->Registers(getInitialSelection()).regcontext.cip;
+    duint initialConstant = getTraceFile()->Address(getInitialSelection());
     constantDlg.setup(tr("Constant"), initialConstant, sizeof(duint));
     if(constantDlg.exec() == QDialog::Accepted)
     {
-        auto ticks = GetTickCount();
+        QTime ticks;
+        ticks.start();
         int count = TraceFileSearchConstantRange(getTraceFile(), constantDlg.getVal(), constantDlg.getVal());
         GuiShowReferences();
-        GuiAddLogMessage(tr("%1 result(s) in %2ms\n").arg(count).arg(GetTickCount() - ticks).toUtf8().constData());
+        GuiAddLogMessage(tr("%1 result(s) in %2ms\n").arg(count).arg(ticks.elapsed()).toUtf8().constData());
     }
 }
 
@@ -1890,11 +1898,13 @@ void TraceBrowser::searchMemRefSlot()
     memRefDlg.setup(tr("References"), 0, sizeof(duint));
     if(memRefDlg.exec() == QDialog::Accepted)
     {
-        auto ticks = GetTickCount();
-        mParent->loadDumpFully();
+        QTime ticks;
+        ticks.start();
+        if(!mParent->loadDumpFully())
+            return;
         int count = TraceFileSearchMemReference(getTraceFile(), memRefDlg.getVal());
         GuiShowReferences();
-        GuiAddLogMessage(tr("%1 result(s) in %2ms\n").arg(count).arg(GetTickCount() - ticks).toUtf8().constData());
+        GuiAddLogMessage(tr("%1 result(s) in %2ms\n").arg(count).arg(ticks.elapsed()).toUtf8().constData());
     }
 }
 

@@ -1,8 +1,6 @@
 #include "TraceWidget.h"
 #include "TraceStack.h"
 #include "TraceDump.h"
-#include "TraceFileReader.h"
-#include "TraceFileDump.h"
 #include "TraceBrowser.h"
 #include "CPUDump.h"
 #include <QClipboard>
@@ -176,7 +174,7 @@ void TraceStack::setupContextMenu()
         return false;
     });
 
-    mMenuBuilder->addAction(makeAction("Edit columns...", SLOT(editColumnDialog())));
+    mMenuBuilder->addAction(makeAction(tr("Edit columns..."), SLOT(editColumnDialog())));
 
     mMenuBuilder->loadFromConfig();
     disconnect(Bridge::getBridge(), SIGNAL(dbgStateChanged(DBGSTATE)), this, SLOT(debugStateChanged(DBGSTATE)));
