@@ -854,24 +854,21 @@ static void cbGenericBreakpoint(BP_TYPE bptype, const void* ExceptionAddress = n
         break;
     }
     varset("$breakpointexceptionaddress", breakpointExceptionAddress, true);
-    if(!(bpPtr && bpPtr->enabled)) //invalid / disabled breakpoint hit (most likely a bug)
+    if(bpPtr == nullptr || !bpPtr->enabled) //invalid / disabled breakpoint hit (most likely a bug)
     {
-        if(bptype != BPDLL || !BpUpdateDllPath(reinterpret_cast<const char*>(ExceptionAddress), &bpPtr))
-        {
-            // release the breakpoint lock to prevent deadlocks during the wait
-            EXCLUSIVE_RELEASE();
-            dputs(QT_TRANSLATE_NOOP("DBG", "Breakpoint reached not in list!"));
-            DebugUpdateGuiSetStateAsync(GetContextDataEx(hActiveThread, UE_CIP), paused);
-            //lock
-            lock(WAITID_RUN);
-            // Plugin callback
-            PLUG_CB_PAUSEDEBUG pauseInfo = { nullptr };
-            plugincbcall(CB_PAUSEDEBUG, &pauseInfo);
-            dbgsetforeground();
-            dbgsetskipexceptions(false);
-            wait(WAITID_RUN);
-            return;
-        }
+        // release the breakpoint lock to prevent deadlocks during the wait
+        EXCLUSIVE_RELEASE();
+        dputs(QT_TRANSLATE_NOOP("DBG", "Breakpoint reached not in list!"));
+        DebugUpdateGuiSetStateAsync(GetContextDataEx(hActiveThread, UE_CIP), paused);
+        //lock
+        lock(WAITID_RUN);
+        // Plugin callback
+        PLUG_CB_PAUSEDEBUG pauseInfo = { nullptr };
+        plugincbcall(CB_PAUSEDEBUG, &pauseInfo);
+        dbgsetforeground();
+        dbgsetskipexceptions(false);
+        wait(WAITID_RUN);
+        return;
     }
 
     // increment hit count
@@ -971,7 +968,11 @@ static void cbGenericBreakpoint(BP_TYPE bptype, const void* ExceptionAddress = n
             {
                 formattedText += "\n";
                 DWORD written = 0;
-                WriteFile(logFile, formattedText.c_str(), (DWORD)formattedText.length(), &written, nullptr);
+                if(WriteFile(logFile, formattedText.c_str(), (DWORD)formattedText.length(), &written, nullptr) == FALSE)
+                {
+                    // WriteFile failed
+                    logFileError = GetLastError();
+                };
             }
         }
         else
