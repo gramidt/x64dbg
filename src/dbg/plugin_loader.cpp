@@ -14,6 +14,8 @@
 #include <shlwapi.h>
 #include <vector>
 
+#include "stringformat.h"
+
 /**
 \brief List of plugins.
 */
@@ -150,7 +152,7 @@ private:
 \param loadall true on unload all.
 \return true if it succeeds, false if it fails.
 */
-bool pluginload(const char* pluginName)
+bool pluginload(const char* pluginName, bool loadall)
 {
     // No empty plugin names allowed
     if(pluginName == nullptr || *pluginName == '\0')
@@ -163,7 +165,8 @@ bool pluginload(const char* pluginName)
     // Obtain the actual plugin path.
     auto pluginPath = gPluginDirectory + L"\\" + StringUtils::Utf8ToUtf16(normalizedName);
     auto pluginSubPath = pluginPath + L"\\" + StringUtils::Utf8ToUtf16(normalizedName) + gPluginExtension;
-    if(PathFileExistsW(pluginSubPath.c_str()))
+    auto subdirPlugin = !!PathFileExistsW(pluginSubPath.c_str());
+    if(subdirPlugin)
     {
         // Plugin resides in a subdirectory
         pluginDirectory = pluginPath;
@@ -194,7 +197,7 @@ bool pluginload(const char* pluginName)
 
     // Set the working and DLL load directories
     ChangeDirectory cd(pluginDirectory.c_str());
-    DllDirectory dd(pluginDirectory == gPluginDirectory ? nullptr : pluginDirectory.c_str());
+    DllDirectory dd(loadall && !subdirPlugin ? nullptr : pluginDirectory.c_str());
 
     // Setup plugin data
     // NOTE: This is a global because during registration the plugin
@@ -205,7 +208,8 @@ bool pluginload(const char* pluginName)
     gLoadingPlugin.hPlugin = LoadLibraryW(pluginPath.c_str()); //load the plugin library
     if(!gLoadingPlugin.hPlugin)
     {
-        dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN] Failed to load plugin: %s\n"), normalizedName.c_str());
+        String error = StringUtils::sprintf("%s (%s)", normalizedName.c_str(), stringformatinline(StringUtils::sprintf("{winerror@%x}", GetLastError())).c_str());
+        dprintf(QT_TRANSLATE_NOOP("DBG", "[PLUGIN] Failed to load plugin: %s\n"), error.c_str());
         return false;
     }
     gLoadingPlugin.pluginit = (PLUGINIT)GetProcAddress(gLoadingPlugin.hPlugin, "pluginit");
@@ -292,7 +296,7 @@ bool pluginload(const char* pluginName)
 
     // Add plugin menus
     {
-        SectionLocker<LockPluginMenuList, false, false> menuLock; //exclusive lock
+        ExclusiveSectionLocker<LockPluginMenuList> menuLock;
 
         auto addPluginMenu = [](GUIMENUTYPE type)
         {
@@ -324,7 +328,7 @@ bool pluginload(const char* pluginName)
 
     // Add the plugin to the list
     {
-        SectionLocker<LockPluginList, false> pluginLock; //exclusive lock
+        ExclusiveSectionLocker<LockPluginList> pluginLock;
         gPluginList.push_back(gLoadingPlugin);
     }
 
@@ -530,7 +534,7 @@ void pluginloadall(const char* pluginDir)
     for(const std::wstring & pluginName : availablePlugins)
     {
         dprintf("[pluginload] %S\n", pluginName.c_str());
-        pluginload(StringUtils::Utf16ToUtf8(pluginName).c_str());
+        pluginload(StringUtils::Utf16ToUtf8(pluginName).c_str(), true);
     }
 
     // Remove the plugins directory after loading finished
@@ -930,7 +934,7 @@ void pluginmenucall(int hEntry)
     if(hEntry == -1)
         return;
 
-    SectionLocker<LockPluginMenuList, true, false> menuLock; //shared lock
+    SharedSectionLocker<LockPluginMenuList> menuLock;
     auto i = gPluginMenuEntryList.begin();
     while(i != gPluginMenuEntryList.end())
     {
@@ -940,7 +944,7 @@ void pluginmenucall(int hEntry)
         {
             PLUG_CB_MENUENTRY menuEntryInfo;
             menuEntryInfo.hEntry = currentMenu.hEntryPlugin;
-            SectionLocker<LockPluginCallbackList, true> callbackLock; //shared lock
+            SharedSectionLocker<LockPluginCallbackList, true> callbackLock;
             const auto & cbList = gPluginCallbackList[CB_MENUENTRY];
             for(auto j = cbList.begin(); j != cbList.end();)
             {

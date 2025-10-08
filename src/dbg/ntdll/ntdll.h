@@ -1,7 +1,17 @@
-#ifndef NTDLL_H
-#define NTDLL_H
-
 #pragma once
+
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601 // XP x64 is version 5.2, Vista is version 6.0, Windows 7 is version 6.1
+#endif // _WIN32_WINNT
+
+#ifdef WINVER // Overwrite WINVER if given on command line
+#undef WINVER
+#endif // WINVER
+#define WINVER _WIN32_WINNT
+
+#ifndef _WIN32_IE
+#define _WIN32_IE _WIN32_IE_WIN7
+#endif //_WIN32_IE
 
 #ifdef __cplusplus
 extern "C" {
@@ -3911,7 +3921,9 @@ typedef struct _TEB
 
     union
     {
+#if (_WIN32_WINNT >= 0x0601)
         PROCESSOR_NUMBER CurrentIdealProcessor;
+#endif
         ULONG IdealProcessorValue;
         struct
         {
@@ -9050,6 +9062,8 @@ RtlWalkHeap(
     _Inout_ PRTL_HEAP_WALK_ENTRY Entry
 );
 
+// NOTE: mingw had an incorrect definition for these
+#ifndef __MINGW32__
 NTSYSAPI
 NTSTATUS
 NTAPI
@@ -9070,6 +9084,7 @@ RtlSetHeapInformation(
     _In_opt_ PVOID HeapInformation,
     _In_opt_ SIZE_T HeapInformationLength
 );
+#endif // __MINGW__
 
 NTSYSAPI
 SIZE_T
@@ -11292,5 +11307,3 @@ TpAlpcUnregisterCompletionList(
 #ifdef __cplusplus
 }
 #endif
-
-#endif // NTDLL_H

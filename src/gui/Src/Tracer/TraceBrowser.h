@@ -34,6 +34,8 @@ public:
     static bool isRecording();
     static bool toggleTraceRecording(QWidget* parent);
 
+    bool hightlightToken(const ZydisTokenizer::SingleToken & token);
+
 private:
     enum TableColumnIndex
     {
@@ -183,6 +185,7 @@ public slots:
 
     void searchConstantSlot();
     void searchMemRefSlot();
+    void searchCallsSlot();
 
     void updateSlot();
 

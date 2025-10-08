@@ -1,12 +1,12 @@
 #include "Disassembly.h"
 #include "Configuration.h"
-#include "CodeFolding.h"
-#include "EncodeMap.h"
+#include <Utils/CodeFolding.h>
+#include <Utils/EncodeMap.h>
 #include "Bridge.h"
-#include "CachedFontMetrics.h"
-#include "QZydis.h"
-#include "MemoryPage.h"
-#include "DisassemblyPopup.h"
+#include <Utils/CachedFontMetrics.h>
+#include <Disassembler/QZydis.h>
+#include <Memory/MemoryPage.h>
+#include <Gui/DisassemblyPopup.h>
 
 Disassembly::Disassembly(Architecture* architecture, bool isMain, QWidget* parent)
     : AbstractTableView(parent),
@@ -611,18 +611,28 @@ QString Disassembly::paintContent(QPainter* painter, duint row, duint col, int x
         char label[MAX_LABEL_SIZE] = "";
         if(GetCommentFormat(va, comment, &autoComment))
         {
-            if(autoComment)
+            if(autoComment && DbgGetLabelAt(va, SEG_DEFAULT, label)) // prefer label over auto-comment
             {
-                richComment.textColor = mAutoCommentColor;
-                richComment.textBackground = mAutoCommentBackgroundColor;
+                richComment.textColor = mLabelColor;
+                richComment.textBackground = mLabelBackgroundColor;
+                richComment.text = label;
             }
-            else //user comment
+            else
             {
-                richComment.textColor = mCommentColor;
-                richComment.textBackground = mCommentBackgroundColor;
+                if(autoComment)
+                {
+                    richComment.textColor = mAutoCommentColor;
+                    richComment.textBackground = mAutoCommentBackgroundColor;
+                }
+                else //user comment
+                {
+                    richComment.textColor = mCommentColor;
+                    richComment.textBackground = mCommentBackgroundColor;
+                }
+
+                richComment.text = std::move(comment);
             }
 
-            richComment.text = std::move(comment);
             richText.emplace_back(std::move(richComment));
         }
         else if(DbgGetLabelAt(va, SEG_DEFAULT, label)) // label but no comment
@@ -726,11 +736,11 @@ duint Disassembly::getAddressForPosition(int mousex, int mousey)
         if(ZydisTokenizer::TokenFromX(instruction.tokens, token, mousex, mFontMetrics))
         {
             duint addr = token.value.value;
-            bool isCodePage = DbgFunctions()->MemIsCodePage(addr, false);
+            bool isCodePage = DbgFunctions()->MemIsCodePage(addr, true);
             if(!isCodePage && instruction.branchDestination)
             {
                 addr = instruction.branchDestination;
-                isCodePage = DbgFunctions()->MemIsCodePage(addr, false);
+                isCodePage = DbgFunctions()->MemIsCodePage(addr, true);
             }
             if(isCodePage && (addr - mMemPage->getBase() < mInstBuffer.front().rva || addr - mMemPage->getBase() > mInstBuffer.back().rva))
             {
@@ -2350,7 +2360,7 @@ bool Disassembly::followInstruction(duint rva)
             dest = instr.arg[op].value;
             if(DbgMemIsValidReadPtr(dest))
             {
-                if(DbgFunctions()->MemIsCodePage(dest, false))
+                if(DbgFunctions()->MemIsCodePage(dest, true))
                     gotoAddress(dest);
                 else if(instr.arg[op].segment == SEG_SS)
                     DbgCmdExec(QString("sdump %1").arg(ToPtrString(dest)));
@@ -2368,7 +2378,7 @@ bool Disassembly::followInstruction(duint rva)
             dest = instr.arg[op].value;
             if(DbgMemIsValidReadPtr(dest))
             {
-                if(DbgFunctions()->MemIsCodePage(dest, false))
+                if(DbgFunctions()->MemIsCodePage(dest, true))
                     gotoAddress(dest);
                 else
                     DbgCmdExec(QString("dump %1").arg(ToPtrString(dest)));

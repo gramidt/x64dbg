@@ -2,6 +2,8 @@
 #include "TraceRegisters.h"
 #include "TraceWidget.h"
 #include "TraceDump.h"
+#include "TraceStack.h"
+#include "TraceBrowser.h"
 #include "Configuration.h"
 #include "EditFloatRegister.h"
 #include "StringUtil.h"
@@ -19,17 +21,36 @@ TraceRegisters::TraceRegisters(TraceWidget* parent) : RegistersView(parent)
 
     wCM_FollowInDump = new QAction(DIcon("dump"), tr("Follow in Dump"), this);
     connect(wCM_FollowInDump, SIGNAL(triggered()), this, SLOT(onFollowInDump()));
+
+    wCM_FollowInStack = new QAction(DIcon("stack"), tr("Follow in Stack"), this);
+    connect(wCM_FollowInStack, SIGNAL(triggered()), this, SLOT(onFollowInStack()));
+
+    wCM_Highlight = setupAction(DIcon("highlight"), tr("Highlight"));
+    connect(wCM_Highlight, SIGNAL(triggered()), this, SLOT(onHighlightSlot()));
+
+    delete SIMDAlwaysShowAVX512; // Currently it doesn't support AVX512
+    SIMDAlwaysShowAVX512 = nullptr;
+    mXMMModeYMMOnly = true;
+
+    wCM_Highlight->setShortcutContext(Qt::WidgetShortcut);
+    this->addAction(wCM_Highlight);
+    wCM_FollowInDump->setShortcutContext(Qt::WidgetShortcut);
+    this->addAction(wCM_FollowInDump);
+    wCM_FollowInStack->setShortcutContext(Qt::WidgetShortcut);
+    this->addAction(wCM_FollowInStack);
+    refreshShortcutsSlot();
 }
 
 void TraceRegisters::setRegisters(REGDUMP* registers)
 {
-    this->RegistersView::setRegisters(registers);
+    this->RegistersView::setRegisters(registers); // TODO: AVX512
 }
 
 void TraceRegisters::setActive(bool isActive)
 {
     this->isActive = isActive;
-    this->RegistersView::setRegisters(&this->mRegDumpStruct);
+    //this->RegistersView::setRegisters(&this->mRegDumpStruct);
+    emit refresh();
 }
 
 void TraceRegisters::displayCustomContextMenuSlot(QPoint pos)
@@ -44,13 +65,15 @@ void TraceRegisters::displayCustomContextMenuSlot(QPoint pos)
         if(mCANSTOREADDRESS.contains(mSelected))
         {
             menu.addAction(wCM_FollowInDump);
+            if(mSelected == CSP || mSelected == CBP) // TODO: Proper support stack detection
+                menu.addAction(wCM_FollowInStack);
         }
         menu.addAction(wCM_CopyToClipboard);
         if(mFPUx87_80BITSDISPLAY.contains(mSelected))
         {
             menu.addAction(wCM_CopyFloatingPointValueToClipboard);
         }
-        if(mFPUMMX.contains(mSelected) || mFPUXMM.contains(mSelected) || mFPUYMM.contains(mSelected))
+        if(mFPUMMX.contains(mSelected) || mFPUXMM.contains(mSelected))
         {
             menu.addAction(wCM_CopySIMDRegister);
         }
@@ -61,8 +84,12 @@ void TraceRegisters::displayCustomContextMenuSlot(QPoint pos)
                 menu.addAction(wCM_CopySymbolToClipboard);
         }
         menu.addAction(wCM_CopyAll);
+        if((mGPR.contains(mSelected) && mSelected != REGISTER_NAME::EFLAGS) || mSEGMENTREGISTER.contains(mSelected) || mFPUMMX.contains(mSelected) || mFPUXMM.contains(mSelected) || mFPUOpmask.contains(mSelected))
+        {
+            menu.addAction(wCM_Highlight);
+        }
 
-        if(mFPUMMX.contains(mSelected) || mFPUXMM.contains(mSelected) || mFPUYMM.contains(mSelected))
+        if(mFPUMMX.contains(mSelected) || mFPUXMM.contains(mSelected))
         {
             menu.addMenu(mSwitchSIMDDispMode);
         }
@@ -102,6 +129,14 @@ void TraceRegisters::displayCustomContextMenuSlot(QPoint pos)
     }
 }
 
+void TraceRegisters::refreshShortcutsSlot()
+{
+    wCM_Highlight->setShortcut(ConfigShortcut("ActionHighlightingMode"));
+    wCM_FollowInDump->setShortcut(ConfigShortcut("ActionFollowDwordQwordDump"));
+    wCM_FollowInStack->setShortcut(ConfigShortcut("ActionFollowStack"));
+    RegistersView::refreshShortcutsSlot();
+}
+
 static void showCopyFloatRegister(int bits, QWidget* parent, const QString & title, char* registerData)
 {
     EditFloatRegister mEditFloat(bits, parent);
@@ -114,10 +149,8 @@ static void showCopyFloatRegister(int bits, QWidget* parent, const QString & tit
 
 void TraceRegisters::onCopySIMDRegister()
 {
-    if(mFPUYMM.contains(mSelected))
-        showCopyFloatRegister(256, this, tr("View YMM register"), registerValue(&mRegDumpStruct, mSelected));
-    else if(mFPUXMM.contains(mSelected))
-        showCopyFloatRegister(128, this, tr("View XMM register"), registerValue(&mRegDumpStruct, mSelected));
+    if(mFPUXMM.contains(mSelected))
+        showCopyFloatRegister(GetSizeRegister(mSelected) * 8, this, tr("View XMM register"), registerValue(&mRegDumpStruct, mSelected));
     else if(mFPUMMX.contains(mSelected))
         showCopyFloatRegister(64, this, tr("View MMX register"), registerValue(&mRegDumpStruct, mSelected));
 }
@@ -146,7 +179,7 @@ void TraceRegisters::onSetCurrentRegister()
         value = (duint)(*(const unsigned short*)registerValue(&mRegDumpStruct, mSelected));
     else if(mDWORDDISPLAY.contains(reg))
         value = (duint)(*(const DWORD*)registerValue(&mRegDumpStruct, mSelected));
-    else if(mFPUXMM.contains(reg) || mFPUYMM.contains(reg) || mFPUMMX.contains(reg) || mFPUx87_80BITSDISPLAY.contains(reg))
+    else if(mFPUXMM.contains(reg) || mFPUMMX.contains(reg) || mFPUOpmask.contains(mSelected) || mFPUx87_80BITSDISPLAY.contains(reg))
         value = (duint)((const char*)registerValue(&mRegDumpStruct, mSelected));
     else
         value = *((const duint*)registerValue(&mRegDumpStruct, mSelected));
@@ -169,7 +202,7 @@ void TraceRegisters::mouseDoubleClickEvent(QMouseEvent* event)
     if(mSelected == CIP) //double clicked on CIP register: follow in disassembly
         DbgCmdExec(QString("disasm %1").arg(ToPtrString(mRegDumpStruct.regcontext.cip)));
     // double clicked on XMM register: open view XMM register dialog
-    else if(mFPUXMM.contains(mSelected) || mFPUYMM.contains(mSelected) || mFPUMMX.contains(mSelected))
+    else if(mFPUXMM.contains(mSelected) || mFPUMMX.contains(mSelected))
         onCopySIMDRegister();
     // double clicked on GPR: nothing to do (copy?)
 }
@@ -182,4 +215,30 @@ void TraceRegisters::onFollowInDump()
             return;
     duint value = *((const duint*)registerValue(&mRegDumpStruct, mSelected));
     mParent->getTraceDump()->printDumpAt(value, true, true, true);
+}
+
+void TraceRegisters::onFollowInStack()
+{
+    // First check if the dump is loaded
+    if(!mParent->getTraceFile()->getDump()->isEnabled())
+        if(!mParent->loadDump())  // Try to load the dump
+            return;
+    duint value = *((const duint*)registerValue(&mRegDumpStruct, mSelected));
+    mParent->getTraceStack()->printDumpAt(value, true, true, true);
+}
+
+void TraceRegisters::onHighlightSlot()
+{
+    TraceBrowser* CPUDisassemblyView = mParent->getTraceBrowser();
+    if(mGPR.contains(mSelected) && mSelected != REGISTER_NAME::EFLAGS)
+        CPUDisassemblyView->hightlightToken(ZydisTokenizer::SingleToken(ZydisTokenizer::TokenType::GeneralRegister, mRegisterMapping.constFind(mSelected).value()));
+    else if(mSEGMENTREGISTER.contains(mSelected))
+        CPUDisassemblyView->hightlightToken(ZydisTokenizer::SingleToken(ZydisTokenizer::TokenType::MemorySegment, mRegisterMapping.constFind(mSelected).value()));
+    else if(mFPUMMX.contains(mSelected))
+        CPUDisassemblyView->hightlightToken(ZydisTokenizer::SingleToken(ZydisTokenizer::TokenType::MmxRegister, mRegisterMapping.constFind(mSelected).value()));
+    else if(mFPUXMM.contains(mSelected))
+        CPUDisassemblyView->hightlightToken(ZydisTokenizer::SingleToken(ZydisTokenizer::TokenType::XmmRegister, mRegisterMapping.constFind(mSelected).value()));
+    else if(mFPUOpmask.contains(mSelected))
+        CPUDisassemblyView->hightlightToken(ZydisTokenizer::SingleToken(ZydisTokenizer::TokenType::ZmmRegister, mRegisterMapping.constFind(mSelected).value()));
+    CPUDisassemblyView->reloadData();
 }

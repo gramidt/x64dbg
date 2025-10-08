@@ -15,7 +15,7 @@ extern GUISENDMESSAGE _gui_sendmessage;
 extern GUITRANSLATETEXT _gui_translate_text;
 
 //DBG typedefs
-typedef const char* (*DBGDBGINIT)();
+typedef const char* (*DBGDBGINIT)(bool blocking);
 typedef duint(*DBGMEMFINDBASEADDR)(duint addr, duint* size);
 typedef bool (*DBGMEMREAD)(duint addr, void* dest, duint size, duint* read);
 typedef bool (*DBGMEMWRITE)(duint addr, const void* src, duint size, duint* written);
@@ -29,7 +29,7 @@ typedef bool (*DBGADDRINFOGET)(duint addr, SEGMENTREG segment, BRIDGE_ADDRINFO* 
 typedef bool (*DBGADDRINFOSET)(duint addr, BRIDGE_ADDRINFO* addrinfo);
 typedef bool(*DBGENCODETYPESET)(duint addr, duint size, ENCODETYPE type);
 typedef BPXTYPE(*DBGBPGETTYPEAT)(duint addr);
-typedef bool (*DBGGETREGDUMP)(REGDUMP* regdump);
+typedef bool (*DBGGETREGDUMP)(REGDUMP_AVX512* regdump);
 typedef bool (*DBGVALTOSTRING)(const char* string, duint value);
 typedef bool (*DBGMEMISVALIDREADPTR)(duint addr);
 typedef int (*DBGGETBPLIST)(BPXTYPE type, BPMAP* bplist);

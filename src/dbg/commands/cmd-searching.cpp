@@ -11,6 +11,8 @@
 #include "disasm_helper.h"
 #include "symbolinfo.h"
 
+#include <ObjBase.h>
+
 static int maxFindResults = 5000;
 
 static bool handlePatternArgument(const char* pattern, std::vector<PatternByte> & searchpattern, String* patternshort = nullptr)
@@ -50,8 +52,8 @@ static bool handlePatternArgument(const char* pattern, std::vector<PatternByte> 
                    || patterntransform(StringUtils::Trim(stringformatinline(pattern), "#"), searchpattern)) && !searchpattern.empty();
     if(result && patternshort)
     {
-        const auto maxShortSize = 16;
-        for(size_t i = 0; i < min(searchpattern.size(), maxShortSize); i++)
+        const size_t maxShortSize = 16;
+        for(size_t i = 0; i < std::min(searchpattern.size(), maxShortSize); i++)
         {
             auto doNibble = [&patternshort](const PatternByte::PatternNibble & n)
             {
@@ -74,19 +76,11 @@ class SearchTimer
 public:
     SearchTimer()
     {
-        if(!LPFN_GetTickCount64)
-            LPFN_GetTickCount64 = (ULONGLONG(*)())GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "GetTickCount64");
-        if(LPFN_GetTickCount64)
-            ticks = LPFN_GetTickCount64();
-        else
-            ticks = GetTickCount();
+        ticks = GetTickCount64();
     }
     void StopTimer()
     {
-        if(LPFN_GetTickCount64)
-            ticks = LPFN_GetTickCount64() - ticks;
-        else
-            ticks = GetTickCount() - ticks;
+        ticks = GetTickCount64() - ticks;
     }
     DWORD GetTicks()
     {
@@ -94,9 +88,7 @@ public:
     }
 private:
     ULONGLONG ticks;
-    static ULONGLONG(*LPFN_GetTickCount64)();
 };
-ULONGLONG(*SearchTimer::LPFN_GetTickCount64)() = nullptr;
 
 bool cbInstrFind(int argc, char* argv[])
 {
@@ -217,7 +209,7 @@ bool cbInstrFindAll(int argc, char* argv[])
             break;
         i += foundoffset + 1;
         result = addr + i - 1;
-        char msg[deflen] = "";
+        char msg[GUI_MAX_DISASSEMBLY_SIZE] = "";
         sprintf_s(msg, "%p", (void*)result);
         GuiReferenceSetRowCount(refCount + 1);
         GuiReferenceSetCellContent(refCount, 0, msg);
@@ -325,8 +317,19 @@ bool cbInstrFindAllMem(int argc, char* argv[])
             }
         }
 
-        if(page.address >= addr && (find_size == -1 || page.address + page.size <= addr + find_size))
+        if(
+            (page.address <= addr && addr < page.address + page.size) ||
+            (addr <= page.address && page.address < addr + find_size)
+        )
+        {
+            // One (partially or fully) overlaps the other
             searchPages.push_back(page);
+        }
+        else if(find_size == -1 && addr <= page.address)
+        {
+            // Not overlapping, but past the address
+            searchPages.push_back(page);
+        }
     }
     SHARED_RELEASE();
 
@@ -353,7 +356,12 @@ bool cbInstrFindAllMem(int argc, char* argv[])
     int refCount = 0;
     for(duint result : results)
     {
-        char msg[deflen] = "";
+        if((result < addr) || ((find_size != -1) && (addr + find_size <= (result + searchpattern.size()))))
+        {
+            continue;
+        }
+
+        char msg[GUI_MAX_DISASSEMBLY_SIZE] = "";
         sprintf_s(msg, "%p", (void*)result);
         GuiReferenceSetRowCount(refCount + 1);
         GuiReferenceSetCellContent(refCount, 0, msg);
@@ -605,7 +613,7 @@ static bool cbRefStr(Zydis* disasm, BASIC_INSTRUCTION_INFO* basicinfo, REFINFO* 
         sprintf_s(strAddrText, "%p", (void*)strAddr);
         GuiReferenceSetRowCount(refinfo->refcount + 1);
         GuiReferenceSetCellContent(refinfo->refcount, 0, addrText);
-        char disassembly[4096] = "";
+        char disassembly[GUI_MAX_DISASSEMBLY_SIZE] = "";
         if(GuiGetDisassembly((duint)disasm->Address(), disassembly))
             GuiReferenceSetCellContent(refinfo->refcount, 1, disassembly);
         else
@@ -650,7 +658,7 @@ static bool cbRefFuncPtr(Zydis* disasm, BASIC_INSTRUCTION_INFO* basicinfo, REFIN
         sprintf_s(addrText, "%p", (void*)(duint)disasm->Address());
         GuiReferenceSetRowCount(refinfo->refcount + 1);
         GuiReferenceSetCellContent(refinfo->refcount, 0, addrText);
-        char disassembly[4096] = "";
+        char disassembly[GUI_MAX_DISASSEMBLY_SIZE] = "";
         if(GuiGetDisassembly((duint)disasm->Address(), disassembly))
             GuiReferenceSetCellContent(refinfo->refcount, 1, disassembly);
         else
@@ -736,6 +744,7 @@ static bool cbModCallFind(Zydis* disasm, BASIC_INSTRUCTION_INFO* basicinfo, REFI
     {
         GuiReferenceInitialize(refinfo->name);
         GuiReferenceAddColumn(2 * sizeof(duint), GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Address")));
+        GuiReferenceAddColumn(20, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Module")));
         GuiReferenceAddColumn(50, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Disassembly")));
         GuiReferenceAddColumn(0, GuiTranslateText(QT_TRANSLATE_NOOP("DBG", "Destination")));
         GuiReferenceSetRowCount(0);
@@ -788,23 +797,29 @@ static bool cbModCallFind(Zydis* disasm, BASIC_INSTRUCTION_INFO* basicinfo, REFI
             }
         }
         break;
+    default:
+        break;
     }
     if(foundaddr)
     {
         char addrText[20] = "";
+        char modName[MAX_MODULE_SIZE] = "";
+        ModNameFromAddr(base, modName, true);
+
         sprintf_s(addrText, "%p", (void*)(duint)disasm->Address());
         GuiReferenceSetRowCount(refinfo->refcount + 1);
         GuiReferenceSetCellContent(refinfo->refcount, 0, addrText);
+        GuiReferenceSetCellContent(refinfo->refcount, 1, modName);
         char disassembly[GUI_MAX_DISASSEMBLY_SIZE] = "";
         if(GuiGetDisassembly((duint)disasm->Address(), disassembly))
         {
-            GuiReferenceSetCellContent(refinfo->refcount, 1, disassembly);
+            GuiReferenceSetCellContent(refinfo->refcount, 2, disassembly);
         }
         else
         {
-            GuiReferenceSetCellContent(refinfo->refcount, 1, disasm->InstructionText().c_str());
+            GuiReferenceSetCellContent(refinfo->refcount, 2, disasm->InstructionText().c_str());
         }
-        GuiReferenceSetCellContent(refinfo->refcount, 2, SymGetSymbolicName(foundaddr).c_str());
+        GuiReferenceSetCellContent(refinfo->refcount, 3, SymGetSymbolicName(foundaddr).c_str());
     }
     return foundaddr != 0;
 }
@@ -990,7 +1005,7 @@ static bool cbGUIDFind(Zydis* disasm, BASIC_INSTRUCTION_INFO* basicinfo, REFINFO
             sprintf_s(addrText, "%p", (void*)(duint)disasm->Address());
             GuiReferenceSetRowCount(refinfo->refcount + 1);
             GuiReferenceSetCellContent(refinfo->refcount, 0, addrText);
-            char disassembly[4096] = "";
+            char disassembly[GUI_MAX_DISASSEMBLY_SIZE] = "";
             if(GuiGetDisassembly((duint)disasm->Address(), disassembly))
                 GuiReferenceSetCellContent(refinfo->refcount, 1, disassembly);
             else

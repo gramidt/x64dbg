@@ -1892,7 +1892,7 @@ bool valfromstring_noexpr(const char* string, duint* value, bool silent, bool ba
         duint start;
         return result && FunctionGet(*value, &start, nullptr) && *value == start;
     }
-    else if(*value = ModBaseFromName(string)) // then come modules
+    else if((*value = ModBaseFromName(string))) // then come modules
         return true;
 
     if(!silent)
@@ -1945,7 +1945,7 @@ static bool longEnough(const char* str, size_t min_length)
 }
 
 /**
-\brief Checks if a string starts with another string.
+\brief Checks if a string starts with another string (ignores case).
 \param pre The desired prefix of the string.
 \param str The complete string.
 \return true if \p str starts with \p pre.
@@ -1963,6 +1963,7 @@ static bool startsWith(const char* pre, const char* str)
 #define MMX_PRE_FIELD_STRING "MM"
 #define XMM_PRE_FIELD_STRING "XMM"
 #define YMM_PRE_FIELD_STRING "YMM"
+#define ZMM_PRE_FIELD_STRING "ZMM"
 #define x8780BITFPU_PRE_FIELD_STRING "x87r"
 #define x8780BITFPU_PRE_FIELD_STRING_ST "st"
 #define STRLEN_USING_SIZEOF(string) (sizeof(string) - 1)
@@ -2105,7 +2106,7 @@ static void setfpuvalue(const char* string, duint value)
     else if(startsWith(x8780BITFPU_PRE_FIELD_STRING, string))
     {
         string += STRLEN_USING_SIZEOF(x8780BITFPU_PRE_FIELD_STRING);
-        DWORD registerindex;
+        TitanRegister registerindex;
         bool found = true;
         switch(*string)
         {
@@ -2197,13 +2198,13 @@ static void setfpuvalue(const char* string, duint value)
         if(found)
         {
             registerindex += UE_x87_r0;
-            SetContextDataEx(hActiveThread, registerindex, value);
+            SetContextDataEx(hActiveThread, (TitanRegister)registerindex, value);
         }
     }
     else if(startsWith(MMX_PRE_FIELD_STRING, string))
     {
         string += STRLEN_USING_SIZEOF(MMX_PRE_FIELD_STRING);
-        DWORD registerindex;
+        TitanRegister registerindex;
         bool found = true;
         switch(*string)
         {
@@ -2261,12 +2262,12 @@ static void setfpuvalue(const char* string, duint value)
             found = false;
         }
         if(found)
-            SetContextDataEx(hActiveThread, registerindex, value);
+            SetContextDataEx(hActiveThread, (TitanRegister)registerindex, value);
     }
     else if(startsWith(YMM_PRE_FIELD_STRING, string))
     {
         string += STRLEN_USING_SIZEOF(YMM_PRE_FIELD_STRING);
-        DWORD registerindex;
+        TitanRegister registerindex;
         bool found = true;
         switch(atoi(string))
         {
@@ -2335,12 +2336,47 @@ static void setfpuvalue(const char* string, duint value)
             break;
 #endif
         default:
-            registerindex = 0;
             found = false;
             break;
         }
         if(found)
             SetContextDataEx(hActiveThread, registerindex, value);
+    }
+    else if(startsWith("K", string))  // Opmask registers
+    {
+        DWORD registerindex;
+        registerindex = atoi(string + 1);
+        if(registerindex < 8)
+        {
+            TITAN_ENGINE_CONTEXT_AVX512_t context = {};
+            if(!GetAVX512Context(hActiveThread, &context))
+            {
+                dputs(QT_TRANSLATE_NOOP("DBG", "Failed to read register context..."));
+            }
+            else
+            {
+                context.Opmask[registerindex] = *(ULONGLONG*)value;
+                SetAVX512Context(hActiveThread, &context);
+            }
+        }
+    }
+    else if(startsWith(ZMM_PRE_FIELD_STRING, string))
+    {
+        DWORD registerindex;
+        registerindex = atoi(string + STRLEN_USING_SIZEOF(ZMM_PRE_FIELD_STRING));
+        if(registerindex < ArchValue(8, 32))
+        {
+            TITAN_ENGINE_CONTEXT_AVX512_t context = {};
+            if(!GetAVX512Context(hActiveThread, &context))
+            {
+                dputs(QT_TRANSLATE_NOOP("DBG", "Failed to read register context..."));
+            }
+            else
+            {
+                context.ZmmRegisters[registerindex] = *(ZmmRegister_t*)value;
+                SetAVX512Context(hActiveThread, &context);
+            }
+        }
     }
 }
 

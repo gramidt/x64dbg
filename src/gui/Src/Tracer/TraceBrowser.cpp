@@ -288,7 +288,7 @@ QString TraceBrowser::paintContent(QPainter* painter, duint row, duint col, int 
     QString reason;
     if(getTraceFile()->isError(reason))
     {
-        GuiAddLogMessage(tr("An error occurred when reading trace file (reason: %1).\r\n").arg(reason).toUtf8().constData());
+        GuiAddLogMessage(tr("An error occurred when reading trace file (reason: %1).\n").arg(reason).toUtf8().constData());
         emit closeFile();
         return "";
     }
@@ -347,6 +347,8 @@ QString TraceBrowser::paintContent(QPainter* painter, duint row, duint col, int 
 
     case Address:
     {
+        BPXTYPE bpxtype = bp_none;
+        bool isbookmark = false;
         QString addrText;
         char label[MAX_LABEL_SIZE] = "";
         if(!DbgIsDebugging())
@@ -356,8 +358,8 @@ QString TraceBrowser::paintContent(QPainter* painter, duint row, duint col, int 
         }
         else
             addrText = getAddrText(cur_addr, label, true);
-        BPXTYPE bpxtype = DbgGetBpxTypeAt(cur_addr);
-        bool isbookmark = DbgGetBookmarkAt(cur_addr);
+        bpxtype = DbgGetBpxTypeAt(cur_addr);
+        isbookmark = DbgGetBookmarkAt(cur_addr);
         //todo: cip
         {
             if(!isbookmark) //no bookmark
@@ -784,8 +786,8 @@ ZydisTokenizer::InstructionToken TraceBrowser::registersTokens(TRACEINDEX atInde
     REGDUMP next = (atIndex + 1 < getTraceFile()->Length()) ? getTraceFile()->Registers(atIndex + 1) : now;
     std::vector<ZydisTokenizer::SingleToken> tokens;
 
-#define addRegValues(str, reg) if (atIndex ==0 || now.regcontext.##reg != next.regcontext.##reg) { \
-    ZydisTokenizer::TokenizeTraceRegister(str, now.regcontext.##reg, next.regcontext.##reg, tokens);};
+#define addRegValues(str, reg) if (atIndex == 0 || now.regcontext.reg != next.regcontext.reg) { \
+    ZydisTokenizer::TokenizeTraceRegister(str, now.regcontext.reg, next.regcontext.reg, tokens);};
 
     addRegValues(ArchValue("eax", "rax"), cax)
     addRegValues(ArchValue("ebx", "rbx"), cbx)
@@ -894,6 +896,8 @@ void TraceBrowser::setupRightClickContextMenu()
     MenuBuilder* searchMenu = new MenuBuilder(this, mTraceFileNotNull);
     searchMenu->addAction(makeAction(DIcon("search_for_constant"), tr("Address/Constant"), SLOT(searchConstantSlot())));
     searchMenu->addAction(makeAction(DIcon("memory-map"), tr("Memory Reference"), SLOT(searchMemRefSlot())));
+    searchMenu->addAction(makeAction(DIcon("call"), tr("&Intermodular Calls"), SLOT(searchCallsSlot())))->setData(QVariant(true));
+    searchMenu->addAction(makeAction(DIcon("call"), tr("&All Calls"), SLOT(searchCallsSlot())))->setData(QVariant(false));
     mMenuBuilder->addMenu(makeMenu(DIcon("search"), tr("&Search")), searchMenu);
 
     // The following code adds a menu to view the information about currently selected instruction. When info box is completed, remove me.
@@ -1043,6 +1047,8 @@ void TraceBrowser::mousePressEvent(QMouseEvent* event)
         break;
     case Qt::ForwardButton:
         gotoNextSlot();
+        break;
+    default:
         break;
     }
 
@@ -1908,6 +1914,15 @@ void TraceBrowser::searchMemRefSlot()
     }
 }
 
+void TraceBrowser::searchCallsSlot()
+{
+    QTime ticks;
+    ticks.start();
+    int count = TraceFileSearchCalls(getTraceFile(), qobject_cast<QAction*>(sender())->data().toBool());
+    GuiShowReferences();
+    GuiAddLogMessage(tr("%1 result(s) in %2ms\n").arg(count).arg(ticks.elapsed()).toUtf8().constData());
+}
+
 void TraceBrowser::updateSlot()
 {
     if(getTraceFile()) // && this->isVisible()
@@ -1938,4 +1953,11 @@ void TraceBrowser::gotoIndexSlot(duint index)
 void TraceBrowser::gotoAddressSlot(duint address)
 {
     disasmByAddress(address, false);
+}
+
+bool TraceBrowser::hightlightToken(const ZydisTokenizer::SingleToken & token)
+{
+    mHighlightToken = token;
+    mHighlightingMode = false;
+    return true;
 }

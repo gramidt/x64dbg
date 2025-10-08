@@ -1,8 +1,8 @@
 #include "QZydis.h"
 #include "StringUtil.h"
-#include "EncodeMap.h"
-#include "CodeFolding.h"
-#include "Bridge.h"
+#include <Utils/EncodeMap.h>
+#include <Utils/CodeFolding.h>
+#include <Bridge.h>
 
 #ifndef _countof
 #define _countof(array) (sizeof(array) / sizeof(array[0]))
@@ -363,6 +363,7 @@ void QZydis::UpdateDataInstructionMap()
     mDataInstMap.insert(enc_mmword, {"mmword", "mmword", "long long"});
     mDataInstMap.insert(enc_xmmword, {"xmmword", "xmmword", "_m128"});
     mDataInstMap.insert(enc_ymmword, {"ymmword", "ymmword", "_m256"});
+    mDataInstMap.insert(enc_zmmword, {"zmmword", "zmmword", "_m512"});
     mDataInstMap.insert(enc_real4, {"real4", "real4", "float"});
     mDataInstMap.insert(enc_real8, {"real8", "real8", "double"});
     mDataInstMap.insert(enc_real10, {"real10", "real10", "long double"});
