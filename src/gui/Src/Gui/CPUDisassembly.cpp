@@ -84,7 +84,7 @@ void CPUDisassembly::mouseDoubleClickEvent(QMouseEvent* event)
         return;
     switch(getColumnIndexFromX(event->x()))
     {
-    case 0: //address
+    case ColAddress: //address
     {
         dsint mSelectedVa = rvaToVa(getInitialSelection());
         if(mRvaDisplayEnabled && mSelectedVa == mRvaDisplayBase)
@@ -100,12 +100,12 @@ void CPUDisassembly::mouseDoubleClickEvent(QMouseEvent* event)
     break;
 
     // (Opcodes) Set INT3 breakpoint
-    case 1:
+    case ColBytes:
         mCommonActions->toggleInt3BPActionSlot();
         break;
 
     // (Disassembly) Assemble dialog
-    case 2:
+    case ColDisassembly:
     {
         duint assembleOnDoubleClickInt;
         bool assembleOnDoubleClick = (BridgeSettingGetUint("Disassembler", "AssembleOnDoubleClick", &assembleOnDoubleClickInt) && assembleOnDoubleClickInt);
@@ -121,7 +121,7 @@ void CPUDisassembly::mouseDoubleClickEvent(QMouseEvent* event)
     break;
 
     // (Comments) Set comment dialog
-    case 3:
+    case ColComment:
         mCommonActions->setCommentSlot();
         break;
 
@@ -300,7 +300,7 @@ void CPUDisassembly::setupRightClickContextMenu()
     copyMenu->addAction(makeShortcutAction(DIcon("copy_address"), tr("&RVA"), SLOT(copyRvaSlot()), "ActionCopyRva"));
     copyMenu->addAction(makeShortcutAction(DIcon("fileoffset"), tr("&File Offset"), SLOT(copyFileOffsetSlot()), "ActionCopyFileOffset"));
     copyMenu->addAction(makeAction(tr("&Header VA"), SLOT(copyHeaderVaSlot())));
-    copyMenu->addAction(makeAction(DIcon("copy_disassembly"), tr("Disassembly"), SLOT(copyDisassemblySlot())));
+    copyMenu->addAction(makeShortcutAction(DIcon("copy_disassembly"), tr("Disassembly"), SLOT(copyDisassemblySlot()), "ActionCopyDisassembly"));
     copyMenu->addBuilder(new MenuBuilder(this, [this](QMenu * menu)
     {
         QSet<QString> labels;
@@ -1217,23 +1217,32 @@ void CPUDisassembly::findPatternSlot()
 {
     HexEditDialog hexEdit(this);
     hexEdit.isDataCopiable(false);
+
+    dsint addr = rvaToVa(getSelectionStart());
+
+    // Setup find mode based on search scope
     if(sender() == mFindPatternRegion)
-        hexEdit.showStartFromSelection(true, ConfigBool("Disassembler", "FindPatternFromSelection"));
+    {
+        // Setup for current memory region
+        duint regionStart = DbgMemFindBaseAddr(addr, 0);
+        duint regionSize = 0;
+        DbgMemFindBaseAddr(addr, &regionSize);
+        duint regionEnd = regionStart + regionSize;
+        hexEdit.setupFindMode(regionStart, regionEnd, addr, ConfigBool("Disassembler", "FindPatternFromSelection"));
+    }
+
     hexEdit.mHexEdit->setOverwriteMode(false);
     hexEdit.setWindowTitle(tr("Find Pattern..."));
     if(hexEdit.exec() != QDialog::Accepted)
         return;
-
-    dsint addr = rvaToVa(getSelectionStart());
 
     QString command;
     if(sender() == mFindPatternRegion)
     {
         bool startFromSelection = hexEdit.startFromSelection();
         Config()->setBool("Disassembler", "FindPatternFromSelection", startFromSelection);
-        if(!startFromSelection)
-            addr = DbgMemFindBaseAddr(addr, 0);
-        command = QString("findall %1, %2").arg(ToHexString(addr), hexEdit.mHexEdit->pattern());
+        dsint searchAddr = startFromSelection ? addr : DbgMemFindBaseAddr(addr, 0);
+        command = QString("findall %1, %2").arg(ToHexString(searchAddr), hexEdit.mHexEdit->pattern());
     }
     else if(sender() == mFindPatternModule)
     {

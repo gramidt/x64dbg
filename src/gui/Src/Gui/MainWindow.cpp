@@ -1060,7 +1060,8 @@ void MainWindow::loadWindowSettings()
         SimpleErrorBox(
             this,
             tr("Unsupported system"),
-            tr("You are running x64dbg on an unsupported operating system version. <b>Future updates will completely stop running on this system.</b><br><br>For more information, see the official <a href=\"%1\">announcement</a>.").arg("https://transition.x64dbg.com")
+            tr("You are running x64dbg on an unsupported operating system version. <b>Future updates will completely stop running on this system.</b><br><br>For more information, see the official <a href=\"%1\">announcement</a>.").arg("https://transition.x64dbg.com"),
+            "HideErrorUnsupportedSystem"
         );
     }
 
@@ -1397,6 +1398,25 @@ bool MainWindow::event(QEvent* event)
     }
 
     return QMainWindow::event(event);
+}
+
+bool MainWindow::nativeEvent(const QByteArray & eventType, void* message, long* result)
+{
+    const auto msg = (MSG*)message;
+    if(msg->message == WM_SYSCOMMAND && (msg->wParam & 0xFFF0) == SC_CLOSE)
+    {
+        // When a modal dialog is open (QDialog::exec), the main window is disabled.
+        // DefWindowProc ignores WM_SYSCOMMAND/SC_CLOSE for disabled windows,
+        // so taskbar right-click -> "Close window" silently fails. We intercept
+        // the message here before DefWindowProc and handle it ourselves.
+        if(QApplication::activeModalWidget())
+        {
+            QApplication::closeAllWindows();
+            *result = 0;
+            return true;
+        }
+    }
+    return QMainWindow::nativeEvent(eventType, message, result);
 }
 
 void MainWindow::updateWindowTitleSlot(QString filename)
