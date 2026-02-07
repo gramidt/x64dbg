@@ -41,6 +41,9 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include("cmake/VSToolchain.cmake")
 
 project(x64dbg
+	LANGUAGES
+		C
+		CXX
 	DESCRIPTION
 		"An open-source x64/x32 debugger for windows."
 )
@@ -113,13 +116,11 @@ endif()
 # Target: btparser
 set(btparser_SOURCES
 	cmake.toml
-	"src/dbg/btparser/btparser/ast.h"
 	"src/dbg/btparser/btparser/helpers.h"
 	"src/dbg/btparser/btparser/keywords.h"
 	"src/dbg/btparser/btparser/lexer.cpp"
 	"src/dbg/btparser/btparser/lexer.h"
 	"src/dbg/btparser/btparser/operators.h"
-	"src/dbg/btparser/btparser/parser.cpp"
 	"src/dbg/btparser/btparser/parser.h"
 	"src/dbg/btparser/btparser/testfiles.h"
 )
@@ -128,6 +129,12 @@ add_library(btparser STATIC)
 
 target_sources(btparser PRIVATE ${btparser_SOURCES})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${btparser_SOURCES})
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_C_COMPILER_ID MATCHES "Clang") # clang-any
+	target_compile_options(btparser PUBLIC
+		-Wno-self-assign-field
+	)
+endif()
 
 target_include_directories(btparser PUBLIC
 	"src/dbg/btparser"
@@ -488,6 +495,24 @@ endif()
 # Target: gui
 set(gui_SOURCES
 	cmake.toml
+	"src/gui/Src/Accessible/Accessible.cpp"
+	"src/gui/Src/Accessible/Accessible.h"
+	"src/gui/Src/Accessible/AccessibleAbstractTableView.cpp"
+	"src/gui/Src/Accessible/AccessibleAbstractTableView.h"
+	"src/gui/Src/Accessible/AccessibleAbstractTableViewCell.cpp"
+	"src/gui/Src/Accessible/AccessibleAbstractTableViewCell.h"
+	"src/gui/Src/Accessible/AccessibleAbstractTableViewCellTitle.cpp"
+	"src/gui/Src/Accessible/AccessibleAbstractTableViewCellTitle.h"
+	"src/gui/Src/Accessible/AccessibleDisassembly.cpp"
+	"src/gui/Src/Accessible/AccessibleDisassembly.h"
+	"src/gui/Src/Accessible/AccessibleHexDump.cpp"
+	"src/gui/Src/Accessible/AccessibleHexDump.h"
+	"src/gui/Src/Accessible/AccessibleRegistersView.cpp"
+	"src/gui/Src/Accessible/AccessibleRegistersView.h"
+	"src/gui/Src/Accessible/AccessibleStdTable.cpp"
+	"src/gui/Src/Accessible/AccessibleStdTable.h"
+	"src/gui/Src/Accessible/AccessibleTraceBrowser.cpp"
+	"src/gui/Src/Accessible/AccessibleTraceBrowser.h"
 	"src/gui/Src/BasicView/AbstractSearchList.h"
 	"src/gui/Src/BasicView/AbstractStdTable.cpp"
 	"src/gui/Src/BasicView/AbstractStdTable.h"
@@ -894,53 +919,6 @@ set_target_properties(gui PROPERTIES
 set(CMKR_TARGET gui)
 include("cmake/deps.cmake")
 
-# Target: loaddll
-set(loaddll_SOURCES
-	cmake.toml
-	"src/loaddll/loaddll.cpp"
-)
-
-add_executable(loaddll)
-
-target_sources(loaddll PRIVATE ${loaddll_SOURCES})
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${loaddll_SOURCES})
-
-if(CMAKE_SIZEOF_VOID_P EQUAL 4) # x86
-	target_link_libraries(loaddll PRIVATE
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/dbg/ntdll/ntdll_x86.lib"
-	)
-endif()
-
-if(CMAKE_SIZEOF_VOID_P EQUAL 8) # x64
-	target_link_libraries(loaddll PRIVATE
-		"${CMAKE_CURRENT_SOURCE_DIR}/src/dbg/ntdll/ntdll_x64.lib"
-	)
-endif()
-
-if(MSVC) # msvc
-	target_link_libraries(loaddll PRIVATE
-		Delayimp
-	)
-endif()
-
-if(MSVC) # msvc
-	target_link_options(loaddll PRIVATE
-		"/DELAYLOAD:user32.dll"
-	)
-endif()
-
-set_target_properties(loaddll PROPERTIES
-	MSVC_RUNTIME_LIBRARY
-		"MultiThreaded$<$<CONFIG:Debug>:Debug>"
-	WIN32_EXECUTABLE
-		ON
-)
-
-get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
-if(NOT CMKR_VS_STARTUP_PROJECT)
-	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT loaddll)
-endif()
-
 # Target: exe
 set(exe_SOURCES
 	cmake.toml
@@ -1001,6 +979,19 @@ if(MSVC) # msvc
 	)
 endif()
 
+if(CMAKE_SIZEOF_VOID_P EQUAL 4) # x86
+	add_dependencies(exe
+		launcher
+	)
+endif()
+
+add_dependencies(exe
+	dbg
+	gui
+	loaddll
+	deps
+)
+
 set_target_properties(exe PROPERTIES
 	MSVC_RUNTIME_LIBRARY
 		"MultiThreaded$<$<CONFIG:Debug>:Debug>"
@@ -1031,9 +1022,52 @@ if(NOT CMKR_VS_STARTUP_PROJECT)
 	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT exe)
 endif()
 
-set(CMKR_TARGET exe)
-# Make the executable the main target
-add_dependencies(exe dbg gui loaddll deps)
+# Target: loaddll
+set(loaddll_SOURCES
+	cmake.toml
+	"src/loaddll/loaddll.cpp"
+)
+
+add_executable(loaddll)
+
+target_sources(loaddll PRIVATE ${loaddll_SOURCES})
+source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${loaddll_SOURCES})
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 4) # x86
+	target_link_libraries(loaddll PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/dbg/ntdll/ntdll_x86.lib"
+	)
+endif()
+
+if(CMAKE_SIZEOF_VOID_P EQUAL 8) # x64
+	target_link_libraries(loaddll PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/src/dbg/ntdll/ntdll_x64.lib"
+	)
+endif()
+
+if(MSVC) # msvc
+	target_link_libraries(loaddll PRIVATE
+		Delayimp
+	)
+endif()
+
+if(MSVC) # msvc
+	target_link_options(loaddll PRIVATE
+		"/DELAYLOAD:user32.dll"
+	)
+endif()
+
+set_target_properties(loaddll PROPERTIES
+	MSVC_RUNTIME_LIBRARY
+		"MultiThreaded$<$<CONFIG:Debug>:Debug>"
+	WIN32_EXECUTABLE
+		ON
+)
+
+get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
+if(NOT CMKR_VS_STARTUP_PROJECT)
+	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT loaddll)
+endif()
 
 # Target: headless
 set(headless_SOURCES
@@ -1064,13 +1098,14 @@ if(MSVC) # msvc
 	)
 endif()
 
+add_dependencies(headless
+	exe
+)
+
 get_directory_property(CMKR_VS_STARTUP_PROJECT DIRECTORY ${PROJECT_SOURCE_DIR} DEFINITION VS_STARTUP_PROJECT)
 if(NOT CMKR_VS_STARTUP_PROJECT)
 	set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT headless)
 endif()
-
-set(CMKR_TARGET headless)
-add_dependencies(headless exe)
 
 # Target: launcher
 if(CMAKE_SIZEOF_VOID_P EQUAL 4) # x86
@@ -1112,8 +1147,5 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 4) # x86
 	if(NOT CMKR_VS_STARTUP_PROJECT)
 		set_property(DIRECTORY ${PROJECT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT launcher)
 	endif()
-
-	set(CMKR_TARGET launcher)
-	add_dependencies(exe launcher)
 
 endif()

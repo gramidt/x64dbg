@@ -12,7 +12,7 @@ if(CMAKE_SCRIPT_MODE_FILE)
     message(STATUS "Copying dependencies from ${DEPS_DIR} to ${GUI_DIR}")
 
     execute_process(
-        COMMAND ${WINDEPLOYQT} --no-compiler-runtime --no-translations --no-opengl-sw --force ${GUI_DLL} --list relative
+        COMMAND ${WINDEPLOYQT} --pdb --no-compiler-runtime --no-translations --no-opengl-sw --force ${GUI_DLL} --list relative
         OUTPUT_VARIABLE DEPS_COPIED
     )
 
@@ -30,8 +30,12 @@ if(CMAKE_SCRIPT_MODE_FILE)
         set(DEPS_COPIED ${DEPS_COPIED} ${relfile} PARENT_SCOPE)
         message(STATUS "Copying ${relfile}")
         get_filename_component(reldir ${relfile} DIRECTORY)
-        get_filename_component(relfile ${relfile} NAME)
-        file(COPY ${DEPS_DIR}/${relfile} DESTINATION ${GUI_DIR}/${reldir})
+        get_filename_component(filename ${relfile} NAME)
+        if(reldir)
+            file(COPY ${DEPS_DIR}/${reldir}/${filename} DESTINATION ${GUI_DIR}/${reldir})
+        else()
+            file(COPY ${DEPS_DIR}/${filename} DESTINATION ${GUI_DIR})
+        endif()
     endfunction()
 
     file(GLOB DEPS RELATIVE ${DEPS_DIR} "${DEPS_DIR}/*.dll")

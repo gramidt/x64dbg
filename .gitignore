@@ -35,3 +35,9 @@ Makefile.*
 
 CMakeLists.txt.user
 /.cache
+CMakeUserPresets.json
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/

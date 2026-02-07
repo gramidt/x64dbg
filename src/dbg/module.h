@@ -116,7 +116,7 @@ struct MODINFO
     std::vector<String> pdbPaths; // Possible PDB paths (tried in order)
 
     HANDLE fileHandle = nullptr;
-    DWORD loadedSize = 0;
+    uint64_t loadedSize = 0;
     HANDLE fileMap = nullptr;
     ULONG_PTR fileMapVA = 0;
 
@@ -147,7 +147,7 @@ struct MODINFO
 };
 
 ULONG64 ModRvaToOffset(ULONG64 base, PIMAGE_NT_HEADERS ntHeaders, ULONG64 rva);
-bool ModLoad(duint Base, duint Size, const char* FullPath, bool loadSymbols = true);
+bool ModLoad(duint Base, duint Size, const char* FullPath, bool loadSymbols = true, HANDLE hFile = nullptr);
 bool ModUnload(duint Base);
 void ModClear(bool updateGui = true);
 MODINFO* ModInfoFromAddr(duint Address);

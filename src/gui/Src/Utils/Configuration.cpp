@@ -217,6 +217,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
 
     defaultColors.insert("ThreadCurrentColor", QColor("#FFFFFF"));
     defaultColors.insert("ThreadCurrentBackgroundColor", QColor("#000000"));
+    defaultColors.insert("CallStackHighlightColor", QColor("#000000"));
+    defaultColors.insert("CallStackHighlightBackgroundColor", QColor("#FFF0A0"));
     defaultColors.insert("WatchTriggeredColor", QColor("#FF0000"));
     defaultColors.insert("WatchTriggeredBackgroundColor", QColor("#FFF8F0"));
     defaultColors.insert("MemoryMapBreakpointColor", QColor("#000000"));
@@ -244,6 +246,8 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     defaultColors.insert("LinkColor", QColor("#0000ff"));
     defaultColors.insert("LogColor", QColor("#000000"));
     defaultColors.insert("LogBackgroundColor", QColor("#FFF8F0"));
+    defaultColors.insert("TraceNewValueColor", QColor("#FF0000"));
+    defaultColors.insert("TraceNewValueBackgroundColor", Qt::transparent);
 
     //bool settings
     QMap<QString, bool> disassemblyBool;
@@ -285,6 +289,7 @@ Configuration::Configuration() : QObject(), noMoreMsgbox(false)
     guiBool.insert("ShowGraphRva", false);
     guiBool.insert("GraphZoomMode", true);
     guiBool.insert("ShowExitConfirmation", false);
+    guiBool.insert("ShowAttachConfirmation", true);
     guiBool.insert("DisableAutoComplete", false);
     guiBool.insert("CaseSensitiveAutoComplete", false);
     guiBool.insert("AutoRepeatOnEnter", false);
